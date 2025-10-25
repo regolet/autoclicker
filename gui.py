@@ -8,6 +8,7 @@ import os
 import json
 from datetime import datetime
 from PIL import Image, ImageTk
+import keyboard
 from mouse_recorder import MouseRecorder
 from auto_clicker import AutoClicker
 from screenshot_analyzer import ScreenshotAnalyzer
@@ -91,6 +92,42 @@ class AutoClickerGUI:
             font=("Consolas", 9)
         )
         self.log_text.pack(fill=tk.BOTH, expand=True)
+
+        # Setup global hotkeys
+        self.setup_hotkeys()
+
+        # Handle window close
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def setup_hotkeys(self):
+        """Setup global keyboard shortcuts"""
+        try:
+            # F9 to start recording
+            keyboard.add_hotkey('f9', self.hotkey_start_recording, suppress=False)
+            # F10 to stop recording
+            keyboard.add_hotkey('f10', self.hotkey_stop_recording, suppress=False)
+            self.log("Hotkeys enabled: F9=Start Recording, F10=Stop Recording")
+        except Exception as e:
+            self.log(f"Warning: Could not setup hotkeys: {e}")
+
+    def hotkey_start_recording(self):
+        """Hotkey handler for starting recording"""
+        if not self.is_recording:
+            self.root.after(0, self.start_recording)
+
+    def hotkey_stop_recording(self):
+        """Hotkey handler for stopping recording"""
+        if self.is_recording:
+            self.root.after(0, self.stop_recording)
+
+    def on_closing(self):
+        """Handle window closing"""
+        try:
+            # Unhook all keyboard hotkeys
+            keyboard.unhook_all()
+        except:
+            pass
+        self.root.destroy()
 
     def create_scrollable_tab(self, tab_name):
         """
@@ -200,6 +237,18 @@ class AutoClickerGUI:
             font=("Arial", 10)
         )
         self.event_count_label.pack(pady=10)
+
+        # Hotkey info
+        hotkey_info = tk.Label(
+            controls_frame,
+            text="⌨ Hotkeys: F9 = Start | F10 = Stop",
+            font=("Arial", 9),
+            fg="#3498db",
+            bg="#ecf0f1",
+            padx=10,
+            pady=5
+        )
+        hotkey_info.pack(pady=5)
 
         # Save options
         save_frame = tk.LabelFrame(content, text="Save Recording", padx=20, pady=20)
