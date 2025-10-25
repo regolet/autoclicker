@@ -137,7 +137,7 @@ class AutoClicker:
             print(f"Target not found: {result.get('error', 'Unknown error')}")
             return False
 
-    def click_on_image(self, template_image_path, confidence=0.8, monitor=None, repeat_count=1, interval=0, playback_events=None, playback_speed=1.0):
+    def click_on_image(self, template_image_path, confidence=0.8, monitor=None, repeat_count=1, interval=0, playback_events=None, playback_speed=1.0, unlimited=False):
         """
         Find and click on a template image using OpenCV matching
 
@@ -145,57 +145,66 @@ class AutoClicker:
             template_image_path: Path to the image to find
             confidence: Confidence threshold (0-1)
             monitor: Monitor number (1, 2, etc.) or None for all monitors
-            repeat_count: Number of times to repeat the action (default: 1)
-            interval: Seconds between repeated actions (default: 0)
+            repeat_count: Number of times to repeat the action (default: 1, ignored if unlimited=True)
+            interval: Seconds to wait before searching for image again (default: 0)
             playback_events: If provided, plays back these recorded events instead of simple click
             playback_speed: Speed multiplier for playback (default: 1.0)
+            unlimited: If True, repeats indefinitely until manually stopped (default: False)
 
         Returns:
             True if found and action performed, False otherwise
         """
-        print(f"Searching for image: {template_image_path}")
+        iteration = 0
+        max_iterations = float('inf') if unlimited else repeat_count
 
-        result = self.analyzer.find_image_on_screen(template_image_path, confidence, monitor=monitor)
+        while iteration < max_iterations:
+            iteration += 1
 
-        if result:
-            x, y, match_confidence = result
-            print(f"Image found at ({x}, {y}) with confidence {match_confidence:.2f}")
+            print(f"Searching for image: {template_image_path} (iteration {iteration}{'...' if unlimited else f'/{repeat_count}'})")
 
-            # Adjust coordinates if monitor was specified
-            if monitor is not None:
-                monitors = self.analyzer.get_monitors()
-                if monitor > 0 and monitor <= len(monitors):
-                    mon = monitors[monitor - 1]
-                    x += mon['left']
-                    y += mon['top']
+            result = self.analyzer.find_image_on_screen(template_image_path, confidence, monitor=monitor)
 
-            time.sleep(0.5)
+            if result:
+                x, y, match_confidence = result
+                print(f"Image found at ({x}, {y}) with confidence {match_confidence:.2f}")
 
-            # Perform action based on mode
-            if playback_events:
-                # Playback recorded mouse movements
-                for i in range(repeat_count):
-                    print(f"Playing back recorded actions (iteration {i + 1}/{repeat_count})")
+                # Adjust coordinates if monitor was specified
+                if monitor is not None:
+                    monitors = self.analyzer.get_monitors()
+                    if monitor > 0 and monitor <= len(monitors):
+                        mon = monitors[monitor - 1]
+                        x += mon['left']
+                        y += mon['top']
+
+                time.sleep(0.5)
+
+                # Perform action based on mode
+                if playback_events:
+                    # Playback recorded mouse movements
+                    print(f"Playing back recorded actions...")
                     self.play_recording(playback_events, speed=playback_speed)
-                    if i < repeat_count - 1 and interval > 0:
-                        print(f"Waiting {interval} seconds before next playback...")
-                        time.sleep(interval)
-                if repeat_count > 1:
-                    print(f"Completed {repeat_count} playbacks")
-            else:
-                # Simple click with repeat
-                for i in range(repeat_count):
+                else:
+                    # Simple click
                     self.click_at_position(x, y)
-                    if i < repeat_count - 1 and interval > 0:
-                        print(f"Waiting {interval} seconds before next click...")
-                        time.sleep(interval)
-                if repeat_count > 1:
-                    print(f"Completed {repeat_count} clicks")
 
-            return True
-        else:
-            print(f"Image not found with confidence >= {confidence}")
-            return False
+                # If more iterations to go, wait the interval before searching again
+                if iteration < max_iterations and interval > 0:
+                    print(f"Waiting {interval} seconds before next search...")
+                    time.sleep(interval)
+                elif iteration >= max_iterations:
+                    print(f"Completed {iteration} iterations")
+                    break
+            else:
+                print(f"Image not found with confidence >= {confidence}")
+                if iteration == 1:
+                    # First attempt failed
+                    return False
+                else:
+                    # Image disappeared during repeats, stop gracefully
+                    print(f"Image no longer found after {iteration-1} successful iterations")
+                    break
+
+        return iteration > 0
 
     def repeat_clicks(self, x, y, count, interval=1.0, button='left'):
         """

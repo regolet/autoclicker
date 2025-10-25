@@ -774,9 +774,21 @@ class AutoClickerGUI:
 
         tk.Label(
             repeat_frame,
-            text="Configure how many times to repeat and interval between repeats:",
+            text="Configure how many times to repeat and interval before each search:",
             font=("Arial", 9)
         ).pack(anchor=tk.W, pady=(0, 5))
+
+        # Unlimited checkbox
+        self.img_unlimited_var = tk.BooleanVar(value=False)
+        unlimited_check = tk.Checkbutton(
+            repeat_frame,
+            text="♾️ Unlimited Repeats (runs until stopped or image not found)",
+            variable=self.img_unlimited_var,
+            font=("Arial", 9, "bold"),
+            fg="#e74c3c",
+            command=self.toggle_img_repeat_count
+        )
+        unlimited_check.pack(anchor=tk.W, pady=5)
 
         repeat_controls = tk.Frame(repeat_frame)
         repeat_controls.pack(fill=tk.X, pady=5)
@@ -784,14 +796,15 @@ class AutoClickerGUI:
         # Repeat count
         tk.Label(repeat_controls, text="Repeat Count:", font=("Arial", 9)).pack(side=tk.LEFT, padx=5)
         self.img_repeat_var = tk.IntVar(value=1)
-        tk.Spinbox(
+        self.img_repeat_spinbox = tk.Spinbox(
             repeat_controls,
             from_=1,
-            to=1000,
+            to=10000,
             textvariable=self.img_repeat_var,
             width=8,
             font=("Arial", 9)
-        ).pack(side=tk.LEFT, padx=5)
+        )
+        self.img_repeat_spinbox.pack(side=tk.LEFT, padx=5)
 
         # Interval
         tk.Label(repeat_controls, text="Interval (seconds):", font=("Arial", 9)).pack(side=tk.LEFT, padx=(20, 5))
@@ -799,7 +812,7 @@ class AutoClickerGUI:
         tk.Spinbox(
             repeat_controls,
             from_=0.0,
-            to=60.0,
+            to=300.0,
             increment=0.5,
             textvariable=self.img_interval_var,
             width=8,
@@ -808,9 +821,10 @@ class AutoClickerGUI:
 
         tk.Label(
             repeat_frame,
-            text="Example: Repeat=5, Interval=2.0 will perform action 5 times with 2 seconds between each",
+            text="Flow: Find image → Click/Playback → Wait interval → Repeat\nExample: Repeat=5, Interval=2 = Click every 2 seconds, 5 times total",
             font=("Arial", 8),
-            fg="gray"
+            fg="gray",
+            justify=tk.LEFT
         ).pack(anchor=tk.W, pady=5)
 
         # Initialize action controls
@@ -1184,6 +1198,13 @@ class AutoClickerGUI:
         if filename:
             self.img_playback_file_var.set(filename)
 
+    def toggle_img_repeat_count(self):
+        """Enable/disable repeat count spinbox based on unlimited checkbox"""
+        if self.img_unlimited_var.get():
+            self.img_repeat_spinbox.config(state='disabled')
+        else:
+            self.img_repeat_spinbox.config(state='normal')
+
     def image_click(self):
         """Find and click on template image"""
         image_path = self.template_image_var.get()
@@ -1199,6 +1220,7 @@ class AutoClickerGUI:
             monitor = None  # None means all monitors
 
         # Get repeat/interval settings
+        unlimited = self.img_unlimited_var.get()
         repeat_count = self.img_repeat_var.get()
         interval = self.img_interval_var.get()
 
@@ -1231,7 +1253,9 @@ class AutoClickerGUI:
                     self.log(f"Using Monitor {monitor}")
                 if action_mode == "playback":
                     self.log(f"Will play recording when found (speed: {playback_speed}x)")
-                if repeat_count > 1:
+                if unlimited:
+                    self.log(f"Unlimited mode: Will repeat forever with {interval}s interval")
+                elif repeat_count > 1:
                     self.log(f"Will repeat {repeat_count} times with {interval}s interval")
 
                 self.update_status("Searching for template image...")
@@ -1243,7 +1267,8 @@ class AutoClickerGUI:
                     repeat_count=repeat_count,
                     interval=interval,
                     playback_events=playback_events,
-                    playback_speed=playback_speed
+                    playback_speed=playback_speed,
+                    unlimited=unlimited
                 )
 
                 if success:
