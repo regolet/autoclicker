@@ -638,13 +638,99 @@ class AutoClickerGUI:
             )
             preview_btn.pack(side=tk.LEFT, padx=10)
 
+        # Action Mode Selection
+        action_mode_frame = tk.LabelFrame(tab, text="Action When Found", padx=20, pady=20)
+        action_mode_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        self.img_action_mode_var = tk.StringVar(value="click")
+
+        tk.Label(
+            action_mode_frame,
+            text="Choose what to do when image is found:",
+            font=("Arial", 9)
+        ).pack(anchor=tk.W, pady=(0, 5))
+
+        # Radio buttons for action mode
+        mode_buttons_frame = tk.Frame(action_mode_frame)
+        mode_buttons_frame.pack(fill=tk.X, pady=5)
+
+        tk.Radiobutton(
+            mode_buttons_frame,
+            text="Simple Click",
+            variable=self.img_action_mode_var,
+            value="click",
+            font=("Arial", 9),
+            command=self.update_img_action_controls
+        ).pack(side=tk.LEFT, padx=5)
+
+        tk.Radiobutton(
+            mode_buttons_frame,
+            text="Play Recording",
+            variable=self.img_action_mode_var,
+            value="playback",
+            font=("Arial", 9),
+            command=self.update_img_action_controls
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Container for dynamic controls
+        self.img_action_controls_frame = tk.Frame(action_mode_frame)
+        self.img_action_controls_frame.pack(fill=tk.X, pady=10)
+
+        # Repeat/Interval settings (for both modes)
+        repeat_frame = tk.LabelFrame(tab, text="Repeat Settings", padx=20, pady=20)
+        repeat_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        tk.Label(
+            repeat_frame,
+            text="Configure how many times to repeat and interval between repeats:",
+            font=("Arial", 9)
+        ).pack(anchor=tk.W, pady=(0, 5))
+
+        repeat_controls = tk.Frame(repeat_frame)
+        repeat_controls.pack(fill=tk.X, pady=5)
+
+        # Repeat count
+        tk.Label(repeat_controls, text="Repeat Count:", font=("Arial", 9)).pack(side=tk.LEFT, padx=5)
+        self.img_repeat_var = tk.IntVar(value=1)
+        tk.Spinbox(
+            repeat_controls,
+            from_=1,
+            to=1000,
+            textvariable=self.img_repeat_var,
+            width=8,
+            font=("Arial", 9)
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Interval
+        tk.Label(repeat_controls, text="Interval (seconds):", font=("Arial", 9)).pack(side=tk.LEFT, padx=(20, 5))
+        self.img_interval_var = tk.DoubleVar(value=0.0)
+        tk.Spinbox(
+            repeat_controls,
+            from_=0.0,
+            to=60.0,
+            increment=0.5,
+            textvariable=self.img_interval_var,
+            width=8,
+            font=("Arial", 9)
+        ).pack(side=tk.LEFT, padx=5)
+
+        tk.Label(
+            repeat_frame,
+            text="Example: Repeat=5, Interval=2.0 will perform action 5 times with 2 seconds between each",
+            font=("Arial", 8),
+            fg="gray"
+        ).pack(anchor=tk.W, pady=5)
+
+        # Initialize action controls
+        self.update_img_action_controls()
+
         # Action button
         action_frame = tk.Frame(tab)
         action_frame.pack(pady=20)
 
         image_click_btn = tk.Button(
             action_frame,
-            text="🔍 Find & Click",
+            text="🔍 Find & Execute",
             command=self.image_click,
             bg="#e67e22",
             fg="white",
@@ -946,6 +1032,67 @@ class AutoClickerGUI:
         if filename:
             self.template_image_var.set(filename)
 
+    def update_img_action_controls(self):
+        """Update the action controls based on selected mode"""
+        # Clear existing controls
+        for widget in self.img_action_controls_frame.winfo_children():
+            widget.destroy()
+
+        mode = self.img_action_mode_var.get()
+
+        if mode == "playback":
+            # Show recording file selection
+            tk.Label(
+                self.img_action_controls_frame,
+                text="Select recording to play when image is found:",
+                font=("Arial", 9)
+            ).pack(anchor=tk.W, pady=(0, 5))
+
+            file_frame = tk.Frame(self.img_action_controls_frame)
+            file_frame.pack(fill=tk.X, pady=5)
+
+            self.img_playback_file_var = tk.StringVar()
+            filename_entry = tk.Entry(
+                file_frame,
+                textvariable=self.img_playback_file_var,
+                font=("Arial", 9),
+                state='readonly'
+            )
+            filename_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+            browse_btn = tk.Button(
+                file_frame,
+                text="Browse...",
+                command=self.browse_playback_file_for_image,
+                cursor="hand2"
+            )
+            browse_btn.pack(side=tk.LEFT)
+
+            # Playback speed
+            speed_frame = tk.Frame(self.img_action_controls_frame)
+            speed_frame.pack(fill=tk.X, pady=5)
+
+            tk.Label(speed_frame, text="Playback Speed:", font=("Arial", 9)).pack(side=tk.LEFT, padx=5)
+            self.img_playback_speed_var = tk.DoubleVar(value=1.0)
+            tk.Spinbox(
+                speed_frame,
+                from_=0.1,
+                to=5.0,
+                increment=0.1,
+                textvariable=self.img_playback_speed_var,
+                width=8,
+                font=("Arial", 9)
+            ).pack(side=tk.LEFT, padx=5)
+            tk.Label(speed_frame, text="x", font=("Arial", 9)).pack(side=tk.LEFT)
+
+    def browse_playback_file_for_image(self):
+        """Browse for recording file to play when image is found"""
+        filename = filedialog.askopenfilename(
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if filename:
+            self.img_playback_file_var.set(filename)
+
     def image_click(self):
         """Find and click on template image"""
         image_path = self.template_image_var.get()
@@ -960,19 +1107,63 @@ class AutoClickerGUI:
         if monitor == 0:
             monitor = None  # None means all monitors
 
+        # Get repeat/interval settings
+        repeat_count = self.img_repeat_var.get()
+        interval = self.img_interval_var.get()
+
+        # Get action mode
+        action_mode = self.img_action_mode_var.get()
+        playback_events = None
+        playback_speed = 1.0
+
+        if action_mode == "playback":
+            # Load recording file
+            playback_file = self.img_playback_file_var.get()
+            if not playback_file:
+                messagebox.showwarning("Input Required", "Please select a recording file for playback mode")
+                return
+
+            try:
+                with open(playback_file, 'r') as f:
+                    data = json.load(f)
+                    playback_events = data['events']
+                    playback_speed = self.img_playback_speed_var.get()
+                    self.log(f"Loaded {len(playback_events)} events from {playback_file}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load recording: {e}")
+                return
+
         def image_click_thread():
             try:
                 self.log(f"Searching for image: {image_path}")
                 if monitor:
                     self.log(f"Using Monitor {monitor}")
+                if action_mode == "playback":
+                    self.log(f"Will play recording when found (speed: {playback_speed}x)")
+                if repeat_count > 1:
+                    self.log(f"Will repeat {repeat_count} times with {interval}s interval")
+
                 self.update_status("Searching for template image...")
 
-                success = self.clicker.click_on_image(image_path, confidence=confidence, monitor=monitor)
+                success = self.clicker.click_on_image(
+                    image_path,
+                    confidence=confidence,
+                    monitor=monitor,
+                    repeat_count=repeat_count,
+                    interval=interval,
+                    playback_events=playback_events,
+                    playback_speed=playback_speed
+                )
 
                 if success:
-                    self.log("Image found and clicked!")
-                    self.update_status("Image click successful")
-                    messagebox.showinfo("Success", "Image found and clicked!")
+                    if action_mode == "playback":
+                        self.log("Image found and recording played!")
+                        self.update_status("Image found and recording played")
+                        messagebox.showinfo("Success", "Image found and recording played!")
+                    else:
+                        self.log("Image found and clicked!")
+                        self.update_status("Image click successful")
+                        messagebox.showinfo("Success", "Image found and clicked!")
                 else:
                     self.log("Image not found")
                     self.update_status("Image not found")
