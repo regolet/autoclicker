@@ -76,21 +76,24 @@ class AutoClicker:
         pyautogui.click(x, y, clicks=clicks, button=button)
         print(f"Clicked at ({x}, {y})")
 
-    def click_on_ai_target(self, target_description, region=None):
+    def click_on_ai_target(self, target_description, region=None, monitor=None, repeat_count=1, interval=0):
         """
         Use AI to find and click on a target
 
         Args:
             target_description: What to look for (e.g., "the submit button")
             region: Optional screen region to search in (x, y, width, height)
+            monitor: Monitor number (1, 2, etc.) or None for all monitors
+            repeat_count: Number of times to repeat the click (default: 1)
+            interval: Seconds between repeated clicks (default: 0)
 
         Returns:
             True if found and clicked, False otherwise
         """
         print(f"Analyzing screen for: {target_description}")
 
-        # Capture screenshot
-        screenshot = self.analyzer.capture_screenshot(region)
+        # Capture screenshot with monitor support
+        screenshot = self.analyzer.capture_screenshot(region=region, monitor=monitor)
 
         # Analyze with AI
         result = self.analyzer.analyze_screenshot_with_ai(screenshot, target_description)
@@ -110,9 +113,25 @@ class AutoClicker:
                 x += region[0]
                 y += region[1]
 
-            # Click on the target
+            # Adjust coordinates if monitor was specified
+            if monitor is not None:
+                monitors = self.analyzer.get_monitors()
+                if monitor > 0 and monitor <= len(monitors):
+                    mon = monitors[monitor - 1]
+                    x += mon['left']
+                    y += mon['top']
+
+            # Click on the target (with repeat if specified)
             time.sleep(0.5)
-            self.click_at_position(x, y)
+            for i in range(repeat_count):
+                self.click_at_position(x, y)
+                if i < repeat_count - 1 and interval > 0:
+                    print(f"Waiting {interval} seconds before next click...")
+                    time.sleep(interval)
+
+            if repeat_count > 1:
+                print(f"Completed {repeat_count} clicks")
+
             return True
         else:
             print(f"Target not found: {result.get('error', 'Unknown error')}")

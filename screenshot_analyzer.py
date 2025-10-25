@@ -10,6 +10,7 @@ import base64
 import io
 from openai import OpenAI
 import os
+from mss import mss
 
 
 class ScreenshotAnalyzer:
@@ -27,16 +28,39 @@ class ScreenshotAnalyzer:
             print("Warning: No OpenAI API key provided. AI analysis will not be available.")
             self.client = None
 
-    def capture_screenshot(self, region=None):
+    def get_monitors(self):
+        """
+        Get list of all monitors
+
+        Returns:
+            List of monitor dictionaries with 'left', 'top', 'width', 'height'
+        """
+        with mss() as sct:
+            monitors = sct.monitors[1:]  # Skip the first one (combined screen)
+            return monitors
+
+    def capture_screenshot(self, region=None, monitor=None):
         """
         Capture a screenshot
 
         Args:
             region: Tuple (x, y, width, height) for specific region, or None for full screen
+            monitor: Monitor number (1, 2, etc.) or None for all monitors
 
         Returns:
             PIL Image object
         """
+        if monitor is not None:
+            # Capture specific monitor
+            with mss() as sct:
+                monitors = sct.monitors
+                if monitor < len(monitors):
+                    mon = monitors[monitor]
+                    screenshot = sct.grab(mon)
+                    return Image.frombytes('RGB', screenshot.size, screenshot.rgb)
+                else:
+                    print(f"Warning: Monitor {monitor} not found, using default")
+
         if region:
             screenshot = pyautogui.screenshot(region=region)
         else:

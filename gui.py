@@ -379,6 +379,90 @@ class AutoClickerGUI:
             tk.Label(frame, text=label, font=("Arial", 9)).pack(side=tk.LEFT)
             tk.Entry(frame, textvariable=var, width=8, font=("Arial", 9)).pack(side=tk.LEFT)
 
+        # Monitor selection
+        monitor_frame = tk.LabelFrame(tab, text="Monitor Selection", padx=20, pady=20)
+        monitor_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        tk.Label(
+            monitor_frame,
+            text="Select which monitor to capture (useful for dual/multi-monitor setups):",
+            font=("Arial", 9)
+        ).pack(anchor=tk.W, pady=(0, 5))
+
+        # Get available monitors
+        try:
+            monitors = self.analyzer.get_monitors()
+            monitor_count = len(monitors)
+        except:
+            monitor_count = 1
+
+        monitor_select_frame = tk.Frame(monitor_frame)
+        monitor_select_frame.pack(fill=tk.X, pady=5)
+
+        self.monitor_var = tk.IntVar(value=0)
+
+        tk.Radiobutton(
+            monitor_select_frame,
+            text="All Monitors (Default)",
+            variable=self.monitor_var,
+            value=0,
+            font=("Arial", 9)
+        ).pack(side=tk.LEFT, padx=5)
+
+        for i in range(monitor_count):
+            tk.Radiobutton(
+                monitor_select_frame,
+                text=f"Monitor {i + 1}",
+                variable=self.monitor_var,
+                value=i + 1,
+                font=("Arial", 9)
+            ).pack(side=tk.LEFT, padx=5)
+
+        # Repeat/Interval settings
+        repeat_frame = tk.LabelFrame(tab, text="Repeat Settings", padx=20, pady=20)
+        repeat_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        tk.Label(
+            repeat_frame,
+            text="Configure how many times to click and the interval between clicks:",
+            font=("Arial", 9)
+        ).pack(anchor=tk.W, pady=(0, 5))
+
+        repeat_controls = tk.Frame(repeat_frame)
+        repeat_controls.pack(fill=tk.X, pady=5)
+
+        # Repeat count
+        tk.Label(repeat_controls, text="Repeat Count:", font=("Arial", 9)).pack(side=tk.LEFT, padx=5)
+        self.ai_repeat_var = tk.IntVar(value=1)
+        tk.Spinbox(
+            repeat_controls,
+            from_=1,
+            to=1000,
+            textvariable=self.ai_repeat_var,
+            width=8,
+            font=("Arial", 9)
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Interval
+        tk.Label(repeat_controls, text="Interval (seconds):", font=("Arial", 9)).pack(side=tk.LEFT, padx=(20, 5))
+        self.ai_interval_var = tk.DoubleVar(value=0.0)
+        tk.Spinbox(
+            repeat_controls,
+            from_=0.0,
+            to=60.0,
+            increment=0.5,
+            textvariable=self.ai_interval_var,
+            width=8,
+            font=("Arial", 9)
+        ).pack(side=tk.LEFT, padx=5)
+
+        tk.Label(
+            repeat_frame,
+            text="Example: Repeat=5, Interval=2.0 will click 5 times with 2 seconds between each click",
+            font=("Arial", 8),
+            fg="gray"
+        ).pack(anchor=tk.W, pady=5)
+
         # Action button
         action_frame = tk.Frame(tab)
         action_frame.pack(pady=20)
@@ -740,12 +824,31 @@ class AutoClickerGUI:
             messagebox.showerror("Invalid Input", "Region values must be integers")
             return
 
+        # Get monitor selection
+        monitor = self.monitor_var.get()
+        if monitor == 0:
+            monitor = None  # None means all monitors
+
+        # Get repeat/interval settings
+        repeat_count = self.ai_repeat_var.get()
+        interval = self.ai_interval_var.get()
+
         def ai_click_thread():
             try:
                 self.log(f"Analyzing screen for: {target}")
+                if monitor:
+                    self.log(f"Using Monitor {monitor}")
+                if repeat_count > 1:
+                    self.log(f"Will click {repeat_count} times with {interval}s interval")
                 self.update_status("Analyzing screenshot with AI...")
 
-                success = self.clicker.click_on_ai_target(target, region=region)
+                success = self.clicker.click_on_ai_target(
+                    target,
+                    region=region,
+                    monitor=monitor,
+                    repeat_count=repeat_count,
+                    interval=interval
+                )
 
                 if success:
                     self.log("Target found and clicked!")
