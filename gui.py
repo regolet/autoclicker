@@ -18,8 +18,11 @@ class AutoClickerGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("AI-Powered Auto Clicker")
-        self.root.geometry("800x700")
+        self.root.geometry("900x750")
         self.root.resizable(True, True)
+
+        # Set minimum window size
+        self.root.minsize(800, 600)
 
         # Load environment variables
         load_dotenv()
@@ -89,14 +92,57 @@ class AutoClickerGUI:
         )
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
+    def create_scrollable_tab(self, tab_name):
+        """
+        Create a scrollable tab frame
+
+        Returns:
+            Tuple of (tab_frame, scrollable_content_frame)
+        """
+        # Create the main tab frame
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text=tab_name)
+
+        # Create canvas and scrollbar
+        canvas = tk.Canvas(tab, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(tab, orient="vertical", command=canvas.yview)
+
+        # Create scrollable frame
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Pack canvas and scrollbar
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Enable mouse wheel scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # Make canvas expand to fill width
+        def _configure_canvas(event):
+            canvas.itemconfig(canvas.find_withtag("all")[0], width=event.width)
+
+        canvas.bind("<Configure>", _configure_canvas)
+
+        return tab, scrollable_frame
+
     def create_recorder_tab(self):
         """Create the mouse recorder tab"""
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="📹 Record")
+        tab, content = self.create_scrollable_tab("📹 Record")
 
         # Instructions
         instructions = tk.Label(
-            tab,
+            content,
             text="Record your mouse movements, clicks, and scrolls",
             font=("Arial", 11),
             pady=10
@@ -104,7 +150,7 @@ class AutoClickerGUI:
         instructions.pack()
 
         # Recording controls frame
-        controls_frame = tk.LabelFrame(tab, text="Recording Controls", padx=20, pady=20)
+        controls_frame = tk.LabelFrame(content, text="Recording Controls", padx=20, pady=20)
         controls_frame.pack(fill=tk.X, padx=20, pady=10)
 
         # Status indicator
@@ -156,7 +202,7 @@ class AutoClickerGUI:
         self.event_count_label.pack(pady=10)
 
         # Save options
-        save_frame = tk.LabelFrame(tab, text="Save Recording", padx=20, pady=20)
+        save_frame = tk.LabelFrame(content, text="Save Recording", padx=20, pady=20)
         save_frame.pack(fill=tk.X, padx=20, pady=10)
 
         tk.Label(save_frame, text="Filename:", font=("Arial", 10)).pack(anchor=tk.W)
@@ -195,8 +241,7 @@ class AutoClickerGUI:
 
     def create_playback_tab(self):
         """Create the playback tab"""
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="▶ Playback")
+        tab, content = self.create_scrollable_tab("▶ Playback")
 
         # Instructions
         instructions = tk.Label(
@@ -208,7 +253,7 @@ class AutoClickerGUI:
         instructions.pack()
 
         # Load recording frame
-        load_frame = tk.LabelFrame(tab, text="Load Recording", padx=20, pady=20)
+        load_frame = tk.LabelFrame(content, text="Load Recording", padx=20, pady=20)
         load_frame.pack(fill=tk.X, padx=20, pady=10)
 
         tk.Label(load_frame, text="Recording file:", font=("Arial", 10)).pack(anchor=tk.W)
@@ -255,7 +300,7 @@ class AutoClickerGUI:
         self.loaded_info_label.pack()
 
         # Playback controls
-        playback_frame = tk.LabelFrame(tab, text="Playback Controls", padx=20, pady=20)
+        playback_frame = tk.LabelFrame(content, text="Playback Controls", padx=20, pady=20)
         playback_frame.pack(fill=tk.X, padx=20, pady=10)
 
         # Speed control
@@ -306,8 +351,7 @@ class AutoClickerGUI:
 
     def create_ai_click_tab(self):
         """Create the AI click tab"""
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="🤖 AI Click")
+        tab, content = self.create_scrollable_tab("🤖 AI Click")
 
         # Instructions
         instructions = tk.Label(
@@ -319,7 +363,7 @@ class AutoClickerGUI:
         instructions.pack()
 
         # API Key status
-        api_status_frame = tk.Frame(tab, bg="#ecf0f1")
+        api_status_frame = tk.Frame(content, bg="#ecf0f1")
         api_status_frame.pack(fill=tk.X, padx=20, pady=5)
 
         if self.api_key:
@@ -338,7 +382,7 @@ class AutoClickerGUI:
         ).pack(pady=5)
 
         # Target description
-        target_frame = tk.LabelFrame(tab, text="Target Description", padx=20, pady=20)
+        target_frame = tk.LabelFrame(content, text="Target Description", padx=20, pady=20)
         target_frame.pack(fill=tk.X, padx=20, pady=10)
 
         tk.Label(
@@ -356,7 +400,7 @@ class AutoClickerGUI:
         target_entry.pack(fill=tk.X, pady=5)
 
         # Region selection (optional)
-        region_frame = tk.LabelFrame(tab, text="Search Region (Optional)", padx=20, pady=20)
+        region_frame = tk.LabelFrame(content, text="Search Region (Optional)", padx=20, pady=20)
         region_frame.pack(fill=tk.X, padx=20, pady=10)
 
         tk.Label(
@@ -381,7 +425,7 @@ class AutoClickerGUI:
             tk.Entry(frame, textvariable=var, width=8, font=("Arial", 9)).pack(side=tk.LEFT)
 
         # Monitor selection
-        monitor_frame = tk.LabelFrame(tab, text="Monitor Selection", padx=20, pady=20)
+        monitor_frame = tk.LabelFrame(content, text="Monitor Selection", padx=20, pady=20)
         monitor_frame.pack(fill=tk.X, padx=20, pady=10)
 
         tk.Label(
@@ -435,7 +479,7 @@ class AutoClickerGUI:
             preview_btn.pack(side=tk.LEFT, padx=10)
 
         # Repeat/Interval settings
-        repeat_frame = tk.LabelFrame(tab, text="Repeat Settings", padx=20, pady=20)
+        repeat_frame = tk.LabelFrame(content, text="Repeat Settings", padx=20, pady=20)
         repeat_frame.pack(fill=tk.X, padx=20, pady=10)
 
         tk.Label(
@@ -480,7 +524,7 @@ class AutoClickerGUI:
         ).pack(anchor=tk.W, pady=5)
 
         # Action button
-        action_frame = tk.Frame(tab)
+        action_frame = tk.Frame(content)
         action_frame.pack(pady=20)
 
         ai_click_btn = tk.Button(
@@ -498,8 +542,7 @@ class AutoClickerGUI:
 
     def create_image_click_tab(self):
         """Create the image template matching tab"""
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="🖼 Image Click")
+        tab, content = self.create_scrollable_tab("🖼 Image Click")
 
         # Instructions
         instructions = tk.Label(
@@ -511,7 +554,7 @@ class AutoClickerGUI:
         instructions.pack()
 
         # Image selection
-        image_frame = tk.LabelFrame(tab, text="Template Image", padx=20, pady=20)
+        image_frame = tk.LabelFrame(content, text="Template Image", padx=20, pady=20)
         image_frame.pack(fill=tk.X, padx=20, pady=10)
 
         tk.Label(
@@ -541,7 +584,7 @@ class AutoClickerGUI:
         browse_btn.pack(side=tk.LEFT)
 
         # Confidence threshold
-        confidence_frame = tk.LabelFrame(tab, text="Matching Settings", padx=20, pady=20)
+        confidence_frame = tk.LabelFrame(content, text="Matching Settings", padx=20, pady=20)
         confidence_frame.pack(fill=tk.X, padx=20, pady=10)
 
         conf_slider_frame = tk.Frame(confidence_frame)
@@ -585,7 +628,7 @@ class AutoClickerGUI:
         ).pack(pady=5)
 
         # Monitor selection
-        img_monitor_frame = tk.LabelFrame(tab, text="Monitor Selection", padx=20, pady=20)
+        img_monitor_frame = tk.LabelFrame(content, text="Monitor Selection", padx=20, pady=20)
         img_monitor_frame.pack(fill=tk.X, padx=20, pady=10)
 
         tk.Label(
@@ -639,7 +682,7 @@ class AutoClickerGUI:
             preview_btn.pack(side=tk.LEFT, padx=10)
 
         # Action Mode Selection
-        action_mode_frame = tk.LabelFrame(tab, text="Action When Found", padx=20, pady=20)
+        action_mode_frame = tk.LabelFrame(content, text="Action When Found", padx=20, pady=20)
         action_mode_frame.pack(fill=tk.X, padx=20, pady=10)
 
         self.img_action_mode_var = tk.StringVar(value="click")
@@ -677,7 +720,7 @@ class AutoClickerGUI:
         self.img_action_controls_frame.pack(fill=tk.X, pady=10)
 
         # Repeat/Interval settings (for both modes)
-        repeat_frame = tk.LabelFrame(tab, text="Repeat Settings", padx=20, pady=20)
+        repeat_frame = tk.LabelFrame(content, text="Repeat Settings", padx=20, pady=20)
         repeat_frame.pack(fill=tk.X, padx=20, pady=10)
 
         tk.Label(
@@ -725,7 +768,7 @@ class AutoClickerGUI:
         self.update_img_action_controls()
 
         # Action button
-        action_frame = tk.Frame(tab)
+        action_frame = tk.Frame(content)
         action_frame.pack(pady=20)
 
         image_click_btn = tk.Button(
@@ -743,8 +786,7 @@ class AutoClickerGUI:
 
     def create_screenshot_tab(self):
         """Create the screenshot tab"""
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="📸 Screenshot")
+        tab, content = self.create_scrollable_tab("📸 Screenshot")
 
         # Instructions
         instructions = tk.Label(
@@ -756,7 +798,7 @@ class AutoClickerGUI:
         instructions.pack()
 
         # Screenshot options
-        options_frame = tk.LabelFrame(tab, text="Screenshot Options", padx=20, pady=20)
+        options_frame = tk.LabelFrame(content, text="Screenshot Options", padx=20, pady=20)
         options_frame.pack(fill=tk.X, padx=20, pady=10)
 
         # Full screen or region
@@ -795,7 +837,7 @@ class AutoClickerGUI:
             tk.Entry(frame, textvariable=var, width=8, font=("Arial", 9)).pack(side=tk.LEFT)
 
         # Save location
-        save_frame = tk.LabelFrame(tab, text="Save Location", padx=20, pady=20)
+        save_frame = tk.LabelFrame(content, text="Save Location", padx=20, pady=20)
         save_frame.pack(fill=tk.X, padx=20, pady=10)
 
         file_frame = tk.Frame(save_frame)
@@ -820,7 +862,7 @@ class AutoClickerGUI:
         browse_btn.pack(side=tk.LEFT)
 
         # Capture button
-        action_frame = tk.Frame(tab)
+        action_frame = tk.Frame(content)
         action_frame.pack(pady=20)
 
         screenshot_btn = tk.Button(
