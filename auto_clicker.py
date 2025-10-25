@@ -137,24 +137,33 @@ class AutoClicker:
             print(f"Target not found: {result.get('error', 'Unknown error')}")
             return False
 
-    def click_on_image(self, template_image_path, confidence=0.8):
+    def click_on_image(self, template_image_path, confidence=0.8, monitor=None):
         """
         Find and click on a template image using OpenCV matching
 
         Args:
             template_image_path: Path to the image to find
             confidence: Confidence threshold (0-1)
+            monitor: Monitor number (1, 2, etc.) or None for all monitors
 
         Returns:
             True if found and clicked, False otherwise
         """
         print(f"Searching for image: {template_image_path}")
 
-        result = self.analyzer.find_image_on_screen(template_image_path, confidence)
+        result = self.analyzer.find_image_on_screen(template_image_path, confidence, monitor=monitor)
 
         if result:
             x, y, match_confidence = result
             print(f"Image found at ({x}, {y}) with confidence {match_confidence:.2f}")
+
+            # Adjust coordinates if monitor was specified
+            if monitor is not None:
+                monitors = self.analyzer.get_monitors()
+                if monitor > 0 and monitor <= len(monitors):
+                    mon = monitors[monitor - 1]
+                    x += mon['left']
+                    y += mon['top']
 
             # Click on the found image
             time.sleep(0.5)

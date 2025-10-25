@@ -7,6 +7,7 @@ import threading
 import os
 import json
 from datetime import datetime
+from PIL import Image, ImageTk
 from mouse_recorder import MouseRecorder
 from auto_clicker import AutoClicker
 from screenshot_analyzer import ScreenshotAnalyzer
@@ -418,6 +419,21 @@ class AutoClickerGUI:
                 font=("Arial", 9)
             ).pack(side=tk.LEFT, padx=5)
 
+        # Preview button
+        if monitor_count > 1:
+            preview_btn = tk.Button(
+                monitor_select_frame,
+                text="👁 Preview Monitors",
+                command=self.show_monitor_preview,
+                bg="#16a085",
+                fg="white",
+                font=("Arial", 9, "bold"),
+                padx=10,
+                pady=5,
+                cursor="hand2"
+            )
+            preview_btn.pack(side=tk.LEFT, padx=10)
+
         # Repeat/Interval settings
         repeat_frame = tk.LabelFrame(tab, text="Repeat Settings", padx=20, pady=20)
         repeat_frame.pack(fill=tk.X, padx=20, pady=10)
@@ -567,6 +583,60 @@ class AutoClickerGUI:
             fg="gray",
             justify=tk.LEFT
         ).pack(pady=5)
+
+        # Monitor selection
+        img_monitor_frame = tk.LabelFrame(tab, text="Monitor Selection", padx=20, pady=20)
+        img_monitor_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        tk.Label(
+            img_monitor_frame,
+            text="Select which monitor to search (for dual/multi-monitor setups):",
+            font=("Arial", 9)
+        ).pack(anchor=tk.W, pady=(0, 5))
+
+        # Get available monitors
+        try:
+            monitors = self.analyzer.get_monitors()
+            monitor_count = len(monitors)
+        except:
+            monitor_count = 1
+
+        monitor_select_frame = tk.Frame(img_monitor_frame)
+        monitor_select_frame.pack(fill=tk.X, pady=5)
+
+        self.img_monitor_var = tk.IntVar(value=0)
+
+        tk.Radiobutton(
+            monitor_select_frame,
+            text="All Monitors",
+            variable=self.img_monitor_var,
+            value=0,
+            font=("Arial", 9)
+        ).pack(side=tk.LEFT, padx=5)
+
+        for i in range(monitor_count):
+            tk.Radiobutton(
+                monitor_select_frame,
+                text=f"Monitor {i + 1}",
+                variable=self.img_monitor_var,
+                value=i + 1,
+                font=("Arial", 9)
+            ).pack(side=tk.LEFT, padx=5)
+
+        # Preview button
+        if monitor_count > 1:
+            preview_btn = tk.Button(
+                monitor_select_frame,
+                text="👁 Preview Monitors",
+                command=self.show_monitor_preview,
+                bg="#16a085",
+                fg="white",
+                font=("Arial", 9, "bold"),
+                padx=10,
+                pady=5,
+                cursor="hand2"
+            )
+            preview_btn.pack(side=tk.LEFT, padx=10)
 
         # Action button
         action_frame = tk.Frame(tab)
@@ -885,12 +955,19 @@ class AutoClickerGUI:
 
         confidence = self.confidence_var.get()
 
+        # Get monitor selection
+        monitor = self.img_monitor_var.get()
+        if monitor == 0:
+            monitor = None  # None means all monitors
+
         def image_click_thread():
             try:
                 self.log(f"Searching for image: {image_path}")
+                if monitor:
+                    self.log(f"Using Monitor {monitor}")
                 self.update_status("Searching for template image...")
 
-                success = self.clicker.click_on_image(image_path, confidence=confidence)
+                success = self.clicker.click_on_image(image_path, confidence=confidence, monitor=monitor)
 
                 if success:
                     self.log("Image found and clicked!")
@@ -954,6 +1031,90 @@ class AutoClickerGUI:
             messagebox.showerror("Error", f"Failed to capture screenshot: {e}")
 
     # Utility methods
+    def show_monitor_preview(self):
+        """Show preview window with thumbnails of all monitors"""
+        try:
+            thumbnails = self.analyzer.get_monitor_thumbnails(max_width=300)
+
+            # Create preview window
+            preview_window = tk.Toplevel(self.root)
+            preview_window.title("Monitor Preview")
+            preview_window.geometry("700x600")
+
+            tk.Label(
+                preview_window,
+                text="Monitor Previews - Click to refresh",
+                font=("Arial", 14, "bold"),
+                pady=10
+            ).pack()
+
+            # Create scrollable frame for thumbnails
+            canvas = tk.Canvas(preview_window)
+            scrollbar = ttk.Scrollbar(preview_window, orient="vertical", command=canvas.yview)
+            scrollable_frame = ttk.Frame(canvas)
+
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+
+            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+
+            # Display thumbnails
+            for i, thumbnail in enumerate(thumbnails):
+                monitor_frame = tk.LabelFrame(
+                    scrollable_frame,
+                    text=f"Monitor {i + 1}",
+                    padx=10,
+                    pady=10,
+                    font=("Arial", 11, "bold")
+                )
+                monitor_frame.pack(fill=tk.X, padx=20, pady=10)
+
+                # Convert PIL image to PhotoImage
+                photo = ImageTk.PhotoImage(thumbnail)
+
+                # Keep reference to prevent garbage collection
+                label = tk.Label(monitor_frame, image=photo)
+                label.image = photo
+                label.pack()
+
+                # Add monitor info
+                try:
+                    monitors = self.analyzer.get_monitors()
+                    mon = monitors[i]
+                    info_text = f"Size: {mon['width']}x{mon['height']} | Position: ({mon['left']}, {mon['top']})"
+                    tk.Label(
+                        monitor_frame,
+                        text=info_text,
+                        font=("Arial", 9),
+                        fg="gray"
+                    ).pack(pady=5)
+                except:
+                    pass
+
+            canvas.pack(side="left", fill="both", expand=True, padx=10, pady=10)
+            scrollbar.pack(side="right", fill="y")
+
+            # Refresh button
+            refresh_btn = tk.Button(
+                preview_window,
+                text="🔄 Refresh Previews",
+                command=lambda: [preview_window.destroy(), self.show_monitor_preview()],
+                bg="#3498db",
+                fg="white",
+                font=("Arial", 10, "bold"),
+                padx=20,
+                pady=10,
+                cursor="hand2"
+            )
+            refresh_btn.pack(pady=10)
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to create monitor preview: {e}")
+            self.log(f"Error creating monitor preview: {e}")
+
     def log(self, message):
         """Add message to log"""
         timestamp = datetime.now().strftime("%H:%M:%S")

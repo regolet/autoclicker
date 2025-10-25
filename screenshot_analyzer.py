@@ -148,19 +148,20 @@ Respond in JSON format:
                 "error": str(e)
             }
 
-    def find_image_on_screen(self, template_image_path, confidence=0.8):
+    def find_image_on_screen(self, template_image_path, confidence=0.8, monitor=None):
         """
         Find a template image on the current screen using OpenCV
 
         Args:
             template_image_path: Path to the template image to search for
             confidence: Confidence threshold (0-1)
+            monitor: Monitor number (1, 2, etc.) or None for all monitors
 
         Returns:
-            Tuple (x, y) of the center of the found image, or None
+            Tuple (x, y, confidence) of the center of the found image, or None
         """
-        # Capture current screen
-        screenshot = self.capture_screenshot()
+        # Capture current screen with monitor support
+        screenshot = self.capture_screenshot(monitor=monitor)
         screenshot_np = np.array(screenshot)
         screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
 
@@ -181,6 +182,34 @@ Respond in JSON format:
             return (center_x, center_y, max_val)
         else:
             return None
+
+    def get_monitor_thumbnails(self, max_width=200):
+        """
+        Capture thumbnails of all monitors
+
+        Args:
+            max_width: Maximum width for thumbnail (height scaled proportionally)
+
+        Returns:
+            List of PIL Image thumbnails
+        """
+        thumbnails = []
+        monitors = self.get_monitors()
+
+        for i, mon in enumerate(monitors):
+            # Capture the monitor
+            screenshot = self.capture_screenshot(monitor=i+1)
+
+            # Calculate thumbnail size maintaining aspect ratio
+            width, height = screenshot.size
+            scale = max_width / width
+            new_height = int(height * scale)
+
+            # Resize to thumbnail
+            thumbnail = screenshot.resize((max_width, new_height), Image.Resampling.LANCZOS)
+            thumbnails.append(thumbnail)
+
+        return thumbnails
 
     def highlight_target(self, screenshot, x, y, output_path='highlighted.png'):
         """
