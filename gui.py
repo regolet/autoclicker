@@ -1,43 +1,45 @@
 """
-GUI Application for AI-Powered Auto Clicker
+GUI Application for Auto Clicker with Image Template Matching
 """
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import threading
 import os
 import json
+import time
 from datetime import datetime
 from PIL import Image, ImageTk
 import keyboard
+import pyautogui
 from mouse_recorder import MouseRecorder
 from auto_clicker import AutoClicker
 from screenshot_analyzer import ScreenshotAnalyzer
-from dotenv import load_dotenv
 
 
 class AutoClickerGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("AI-Powered Auto Clicker")
+        self.root.title("Auto Clicker with Image Matching")
         self.root.geometry("900x750")
         self.root.resizable(True, True)
 
         # Set minimum window size
         self.root.minsize(800, 600)
 
-        # Load environment variables
-        load_dotenv()
-        self.api_key = os.getenv('OPENAI_API_KEY')
-
         # Initialize components
         self.recorder = MouseRecorder()
-        self.clicker = AutoClicker(api_key=self.api_key)
-        self.analyzer = ScreenshotAnalyzer(api_key=self.api_key)
+        self.clicker = AutoClicker()
+        self.analyzer = ScreenshotAnalyzer()
 
         # State variables
         self.is_recording = False
         self.current_recording_file = None
         self.loaded_events = []
+        self.img_click_running = False  # Flag for stopping image click
+        self.alarms = []  # List of alarm dictionaries
+        self.alarm_monitor_running = False  # Flag for alarm monitoring thread
+        self.alarm_monitor_thread = None  # Thread for monitoring all alarms
+        self.alarms_file = "alarms.json"  # Separate file for alarms
 
         # Setup GUI
         self.setup_gui()
@@ -51,7 +53,7 @@ class AutoClickerGUI:
 
         title_label = tk.Label(
             title_frame,
-            text="🤖 AI-Powered Auto Clicker",
+            text="🖱️ Auto Clicker with Image Matching",
             font=("Arial", 18, "bold"),
             bg="#2c3e50",
             fg="white"
@@ -63,22 +65,56 @@ class AutoClickerGUI:
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         # Create tabs
+        self.create_image_click_tab()
         self.create_recorder_tab()
         self.create_playback_tab()
-        self.create_ai_click_tab()
-        self.create_image_click_tab()
         self.create_screenshot_tab()
+        self.create_alarm_tab()
 
-        # Status bar
+        # Status bar with save/load buttons
+        status_frame = tk.Frame(self.root, bg="#ecf0f1")
+        status_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Load settings button
+        load_settings_btn = tk.Button(
+            status_frame,
+            text="📂 Load Settings",
+            command=self.manual_load_settings,
+            bg="#27ae60",
+            fg="white",
+            font=("Arial", 9, "bold"),
+            padx=10,
+            pady=2,
+            cursor="hand2",
+            relief=tk.FLAT
+        )
+        load_settings_btn.pack(side=tk.RIGHT, padx=2, pady=2)
+
+        # Save settings button
+        save_settings_btn = tk.Button(
+            status_frame,
+            text="💾 Save Settings",
+            command=self.manual_save_settings,
+            bg="#3498db",
+            fg="white",
+            font=("Arial", 9, "bold"),
+            padx=10,
+            pady=2,
+            cursor="hand2",
+            relief=tk.FLAT
+        )
+        save_settings_btn.pack(side=tk.RIGHT, padx=2, pady=2)
+
+        # Status label
         self.status_bar = tk.Label(
-            self.root,
+            status_frame,
             text="Ready",
             bd=1,
             relief=tk.SUNKEN,
             anchor=tk.W,
             bg="#ecf0f1"
         )
-        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.status_bar.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # Log area
         log_frame = tk.LabelFrame(self.root, text="Activity Log", padx=5, pady=5)
@@ -93,6 +129,19 @@ class AutoClickerGUI:
         )
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
+        # Settings file path
+        self.settings_file = "app_settings.json"
+
+        # Load saved settings
+        self.load_settings()
+        self.load_alarms()
+
+        # Apply saved settings after all UI elements are created
+        self.apply_saved_settings()
+
+        # Auto-start alarm monitoring if there are enabled alarms
+        self.auto_start_alarm_monitoring()
+
         # Setup global hotkeys
         self.setup_hotkeys()
 
@@ -106,7 +155,12 @@ class AutoClickerGUI:
             keyboard.add_hotkey('f9', self.hotkey_start_recording, suppress=False)
             # F10 to stop recording
             keyboard.add_hotkey('f10', self.hotkey_stop_recording, suppress=False)
+            # F11 to start image click
+            keyboard.add_hotkey('f11', self.hotkey_start_image_click, suppress=False)
+            # F12 to stop image click
+            keyboard.add_hotkey('f12', self.hotkey_stop_image_click, suppress=False)
             self.log("Hotkeys enabled: F9=Start Recording, F10=Stop Recording")
+            self.log("Hotkeys enabled: F11=Start Image Click, F12=Stop Image Click")
         except Exception as e:
             self.log(f"Warning: Could not setup hotkeys: {e}")
 
@@ -120,8 +174,266 @@ class AutoClickerGUI:
         if self.is_recording:
             self.root.after(0, self.stop_recording)
 
+    def hotkey_start_image_click(self):
+        """Hotkey handler for starting image click"""
+        if not self.img_click_running:
+            self.root.after(0, self.start_image_click)
+
+    def hotkey_stop_image_click(self):
+        """Hotkey handler for stopping image click"""
+        if self.img_click_running:
+            self.root.after(0, self.stop_image_click)
+
+    def manual_save_settings(self):
+        """Manually save settings with user feedback"""
+        self.save_settings()
+        self.log("Settings saved successfully!")
+        self.update_status("Settings saved")
+        # Brief visual feedback
+        self.root.after(2000, lambda: self.update_status("Ready"))
+
+    def manual_load_settings(self):
+        """Manually load settings with user feedback"""
+        self.load_settings()
+        self.apply_saved_settings()
+        self.log("Settings reloaded from file!")
+        self.update_status("Settings loaded")
+        # Brief visual feedback
+        self.root.after(2000, lambda: self.update_status("Ready"))
+
+    def save_settings(self):
+        """Save current settings to file"""
+        settings = {
+            # Playback settings
+            "last_playback_file": self.playback_filename_var.get() if hasattr(self, 'playback_filename_var') else "",
+            "playback_speed": self.speed_var.get() if hasattr(self, 'speed_var') else 1.0,
+
+            # Image Click settings
+            "template_image": self.template_image_var.get() if hasattr(self, 'template_image_var') else "",
+            "confidence": self.confidence_var.get() if hasattr(self, 'confidence_var') else 0.8,
+            "img_monitor": self.img_monitor_var.get() if hasattr(self, 'img_monitor_var') else 0,
+            "img_action_mode": self.img_action_mode_var.get() if hasattr(self, 'img_action_mode_var') else "click",
+            "img_repeat": self.img_repeat_var.get() if hasattr(self, 'img_repeat_var') else 1,
+            "img_interval": self.img_interval_var.get() if hasattr(self, 'img_interval_var') else 0.0,
+            "img_unlimited": self.img_unlimited_var.get() if hasattr(self, 'img_unlimited_var') else False,
+            "img_playback_file": self.img_playback_file_var.get() if hasattr(self, 'img_playback_file_var') else "",
+            "img_playback_speed": self.img_playback_speed_var.get() if hasattr(self, 'img_playback_speed_var') else 1.0,
+
+            # Recording settings
+            "record_filename": self.record_filename_var.get() if hasattr(self, 'record_filename_var') else "recording.json",
+
+            # Screenshot settings
+            "screenshot_mode": self.screenshot_mode_var.get() if hasattr(self, 'screenshot_mode_var') else "full",
+            "ss_region_x": self.ss_region_x_var.get() if hasattr(self, 'ss_region_x_var') else "",
+            "ss_region_y": self.ss_region_y_var.get() if hasattr(self, 'ss_region_y_var') else "",
+            "ss_region_w": self.ss_region_w_var.get() if hasattr(self, 'ss_region_w_var') else "",
+            "ss_region_h": self.ss_region_h_var.get() if hasattr(self, 'ss_region_h_var') else "",
+            "screenshot_filename": self.screenshot_filename_var.get() if hasattr(self, 'screenshot_filename_var') else ""
+        }
+
+        try:
+            with open(self.settings_file, 'w') as f:
+                json.dump(settings, f, indent=2)
+        except Exception as e:
+            print(f"Error saving settings: {e}")
+
+    def load_settings(self):
+        """Load settings from file"""
+        if not os.path.exists(self.settings_file):
+            return
+
+        try:
+            with open(self.settings_file, 'r') as f:
+                settings = json.load(f)
+
+            # Store settings to apply after UI is created
+            self.saved_settings = settings
+            # Don't log here - log widget doesn't exist yet
+            print("Settings loaded from file")
+        except Exception as e:
+            print(f"Error loading settings: {e}")
+            self.saved_settings = {}
+
+    def apply_saved_settings(self):
+        """Apply saved settings to UI elements"""
+        if not hasattr(self, 'saved_settings') or not self.saved_settings:
+            return
+
+        settings = self.saved_settings
+
+        try:
+            # Apply playback settings
+            if "last_playback_file" in settings and hasattr(self, 'playback_filename_var'):
+                self.playback_filename_var.set(settings["last_playback_file"])
+            if "playback_speed" in settings and hasattr(self, 'speed_var'):
+                self.speed_var.set(settings["playback_speed"])
+
+            # Apply Image Click settings
+            if "template_image" in settings and hasattr(self, 'template_image_var'):
+                self.template_image_var.set(settings["template_image"])
+            if "confidence" in settings and hasattr(self, 'confidence_var'):
+                self.confidence_var.set(settings["confidence"])
+            if "img_monitor" in settings and hasattr(self, 'img_monitor_var'):
+                self.img_monitor_var.set(settings["img_monitor"])
+            if "img_action_mode" in settings and hasattr(self, 'img_action_mode_var'):
+                self.img_action_mode_var.set(settings["img_action_mode"])
+            if "img_repeat" in settings and hasattr(self, 'img_repeat_var'):
+                self.img_repeat_var.set(settings["img_repeat"])
+            if "img_interval" in settings and hasattr(self, 'img_interval_var'):
+                self.img_interval_var.set(settings["img_interval"])
+            if "img_unlimited" in settings and hasattr(self, 'img_unlimited_var'):
+                self.img_unlimited_var.set(settings["img_unlimited"])
+                if hasattr(self, 'toggle_img_repeat_count'):
+                    self.toggle_img_repeat_count()
+            if "img_playback_file" in settings and hasattr(self, 'img_playback_file_var'):
+                self.img_playback_file_var.set(settings["img_playback_file"])
+            if "img_playback_speed" in settings and hasattr(self, 'img_playback_speed_var'):
+                self.img_playback_speed_var.set(settings["img_playback_speed"])
+
+            # Apply recording settings
+            if "record_filename" in settings and hasattr(self, 'record_filename_var'):
+                self.record_filename_var.set(settings["record_filename"])
+
+            # Apply screenshot settings
+            if "screenshot_mode" in settings and hasattr(self, 'screenshot_mode_var'):
+                self.screenshot_mode_var.set(settings["screenshot_mode"])
+            if "ss_region_x" in settings and hasattr(self, 'ss_region_x_var'):
+                self.ss_region_x_var.set(settings["ss_region_x"])
+            if "ss_region_y" in settings and hasattr(self, 'ss_region_y_var'):
+                self.ss_region_y_var.set(settings["ss_region_y"])
+            if "ss_region_w" in settings and hasattr(self, 'ss_region_w_var'):
+                self.ss_region_w_var.set(settings["ss_region_w"])
+            if "ss_region_h" in settings and hasattr(self, 'ss_region_h_var'):
+                self.ss_region_h_var.set(settings["ss_region_h"])
+            if "screenshot_filename" in settings and hasattr(self, 'screenshot_filename_var'):
+                self.screenshot_filename_var.set(settings["screenshot_filename"])
+
+            # Update UI based on loaded settings
+            if hasattr(self, 'update_img_action_controls'):
+                self.update_img_action_controls()
+
+            # Log success after log widget exists
+            if hasattr(self, 'log_text'):
+                self.log("Settings loaded from previous session")
+
+        except Exception as e:
+            import traceback
+            print(f"Error applying settings: {e}")
+            traceback.print_exc()
+
+    def load_alarms(self):
+        """Load alarms from separate alarms.json file"""
+        if not os.path.exists(self.alarms_file):
+            self.alarms = []
+            return
+
+        try:
+            with open(self.alarms_file, 'r') as f:
+                self.alarms = json.load(f)
+            print(f"Loaded {len(self.alarms)} alarms from {self.alarms_file}")
+            # Refresh alarm list if widget exists
+            if hasattr(self, 'alarm_listbox'):
+                self.refresh_alarm_list()
+        except Exception as e:
+            print(f"Error loading alarms: {e}")
+            self.alarms = []
+
+    def save_alarms(self):
+        """Save alarms to separate alarms.json file"""
+        try:
+            with open(self.alarms_file, 'w') as f:
+                json.dump(self.alarms, f, indent=2)
+            print(f"Saved {len(self.alarms)} alarms to {self.alarms_file}")
+        except Exception as e:
+            print(f"Error saving alarms: {e}")
+
+    def auto_start_alarm_monitoring(self):
+        """Automatically start alarm monitoring if there are enabled alarms"""
+        if not self.alarms:
+            return
+
+        enabled_count = sum(1 for alarm in self.alarms if alarm['enabled'])
+        if enabled_count > 0:
+            # Start monitoring without showing any messages
+            self.start_alarm_monitor()
+            print(f"Auto-started alarm monitoring with {enabled_count} enabled alarms")
+
+    def find_and_click_image(self, image_path, confidence=0.8, monitor=None, max_retries=-1, retry_interval=2.0):
+        """
+        Find an image on screen and click on it. Keeps retrying until found.
+
+        Args:
+            image_path: Path to the image file to find
+            confidence: Confidence threshold (0-1) for matching
+            monitor: Monitor number (1, 2, etc.) or None for all monitors
+            max_retries: Maximum number of retries (-1 for unlimited)
+            retry_interval: Time in seconds between retries
+
+        Returns:
+            True if image was found and clicked, False if max retries exceeded or file not found
+        """
+        try:
+            if not os.path.exists(image_path):
+                self.log(f"Image file not found: {image_path}")
+                return False
+
+            attempt = 0
+            image_name = os.path.basename(image_path)
+            self.log(f"Searching for image: {image_name}")
+
+            while (max_retries == -1 or attempt < max_retries) and self.alarm_monitor_running:
+                try:
+                    # Find the image on screen
+                    result = self.analyzer.find_image_on_screen(image_path, confidence, monitor)
+
+                    if result:
+                        x, y, match_confidence = result
+
+                        # Adjust coordinates if monitor was specified
+                        if monitor is not None:
+                            monitors = self.analyzer.get_monitors()
+                            if monitor > 0 and monitor <= len(monitors):
+                                mon = monitors[monitor - 1]
+                                x += mon['left']
+                                y += mon['top']
+                                self.log(f"Adjusted coordinates for monitor {monitor}: ({x}, {y})")
+
+                        # Move mouse to the position and click
+                        pyautogui.moveTo(x, y, duration=0.2)
+                        pyautogui.click()
+                        self.log(f"Image found and clicked at ({x}, {y}) with confidence {match_confidence:.2f}")
+                        return True
+                    else:
+                        attempt += 1
+                        if attempt == 1:
+                            self.log(f"Image not found, retrying every {retry_interval}s until found...")
+                        elif attempt % 10 == 0:  # Log every 10 attempts to avoid spam
+                            self.log(f"Still searching for {image_name}... (attempt {attempt})")
+
+                        # Wait before retrying (check alarm_monitor_running during sleep)
+                        for _ in range(int(retry_interval * 10)):
+                            if not self.alarm_monitor_running:
+                                self.log(f"Image search stopped for: {image_name}")
+                                return False
+                            time.sleep(0.1)
+
+                except Exception as search_error:
+                    self.log(f"Error during image search (attempt {attempt}): {search_error}")
+                    time.sleep(retry_interval)
+                    attempt += 1
+
+            self.log(f"Max retries ({max_retries}) reached for image: {image_name}")
+            return False
+
+        except Exception as e:
+            self.log(f"Error finding/clicking image: {e}")
+            return False
+
     def on_closing(self):
         """Handle window closing"""
+        # Save settings before closing
+        self.save_settings()
+
         try:
             # Unhook all keyboard hotkeys
             keyboard.unhook_all()
@@ -163,7 +475,18 @@ class AutoClickerGUI:
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        # Bind to enter/leave events to enable scrolling when mouse is over the tab
+        def _bind_to_mousewheel(event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _unbind_from_mousewheel(event):
+            canvas.unbind_all("<MouseWheel>")
+
+        # Bind when mouse enters the canvas area
+        canvas.bind('<Enter>', _bind_to_mousewheel)
+        canvas.bind('<Leave>', _unbind_from_mousewheel)
+        scrollable_frame.bind('<Enter>', _bind_to_mousewheel)
+        scrollable_frame.bind('<Leave>', _unbind_from_mousewheel)
 
         # Make canvas expand to fill width
         def _configure_canvas(event):
@@ -398,197 +721,6 @@ class AutoClickerGUI:
         )
         warning_label.pack()
 
-    def create_ai_click_tab(self):
-        """Create the AI click tab"""
-        tab, content = self.create_scrollable_tab("🤖 AI Click")
-
-        # Instructions
-        instructions = tk.Label(
-            tab,
-            text="Use AI to analyze screenshots and click on described elements",
-            font=("Arial", 11),
-            pady=10
-        )
-        instructions.pack()
-
-        # API Key status
-        api_status_frame = tk.Frame(content, bg="#ecf0f1")
-        api_status_frame.pack(fill=tk.X, padx=20, pady=5)
-
-        if self.api_key:
-            status_text = "✅ OpenAI API Key: Configured"
-            status_color = "#27ae60"
-        else:
-            status_text = "❌ OpenAI API Key: Not configured (check .env file)"
-            status_color = "#e74c3c"
-
-        tk.Label(
-            api_status_frame,
-            text=status_text,
-            font=("Arial", 9),
-            fg=status_color,
-            bg="#ecf0f1"
-        ).pack(pady=5)
-
-        # Target description
-        target_frame = tk.LabelFrame(content, text="Target Description", padx=20, pady=20)
-        target_frame.pack(fill=tk.X, padx=20, pady=10)
-
-        tk.Label(
-            target_frame,
-            text="Describe what to click (e.g., 'the blue submit button', 'the search icon'):",
-            font=("Arial", 10)
-        ).pack(anchor=tk.W, pady=(0, 5))
-
-        self.ai_target_var = tk.StringVar()
-        target_entry = tk.Entry(
-            target_frame,
-            textvariable=self.ai_target_var,
-            font=("Arial", 11)
-        )
-        target_entry.pack(fill=tk.X, pady=5)
-
-        # Region selection (optional)
-        region_frame = tk.LabelFrame(content, text="Search Region (Optional)", padx=20, pady=20)
-        region_frame.pack(fill=tk.X, padx=20, pady=10)
-
-        tk.Label(
-            region_frame,
-            text="Leave empty to search entire screen, or specify region:",
-            font=("Arial", 9)
-        ).pack(anchor=tk.W)
-
-        region_inputs = tk.Frame(region_frame)
-        region_inputs.pack(fill=tk.X, pady=5)
-
-        self.region_x_var = tk.StringVar()
-        self.region_y_var = tk.StringVar()
-        self.region_w_var = tk.StringVar()
-        self.region_h_var = tk.StringVar()
-
-        for label, var in [("X:", self.region_x_var), ("Y:", self.region_y_var),
-                           ("Width:", self.region_w_var), ("Height:", self.region_h_var)]:
-            frame = tk.Frame(region_inputs)
-            frame.pack(side=tk.LEFT, padx=5)
-            tk.Label(frame, text=label, font=("Arial", 9)).pack(side=tk.LEFT)
-            tk.Entry(frame, textvariable=var, width=8, font=("Arial", 9)).pack(side=tk.LEFT)
-
-        # Monitor selection
-        monitor_frame = tk.LabelFrame(content, text="Monitor Selection", padx=20, pady=20)
-        monitor_frame.pack(fill=tk.X, padx=20, pady=10)
-
-        tk.Label(
-            monitor_frame,
-            text="Select which monitor to capture (useful for dual/multi-monitor setups):",
-            font=("Arial", 9)
-        ).pack(anchor=tk.W, pady=(0, 5))
-
-        # Get available monitors
-        try:
-            monitors = self.analyzer.get_monitors()
-            monitor_count = len(monitors)
-        except:
-            monitor_count = 1
-
-        monitor_select_frame = tk.Frame(monitor_frame)
-        monitor_select_frame.pack(fill=tk.X, pady=5)
-
-        self.monitor_var = tk.IntVar(value=0)
-
-        tk.Radiobutton(
-            monitor_select_frame,
-            text="All Monitors (Default)",
-            variable=self.monitor_var,
-            value=0,
-            font=("Arial", 9)
-        ).pack(side=tk.LEFT, padx=5)
-
-        for i in range(monitor_count):
-            tk.Radiobutton(
-                monitor_select_frame,
-                text=f"Monitor {i + 1}",
-                variable=self.monitor_var,
-                value=i + 1,
-                font=("Arial", 9)
-            ).pack(side=tk.LEFT, padx=5)
-
-        # Preview button
-        if monitor_count > 1:
-            preview_btn = tk.Button(
-                monitor_select_frame,
-                text="👁 Preview Monitors",
-                command=self.show_monitor_preview,
-                bg="#16a085",
-                fg="white",
-                font=("Arial", 9, "bold"),
-                padx=10,
-                pady=5,
-                cursor="hand2"
-            )
-            preview_btn.pack(side=tk.LEFT, padx=10)
-
-        # Repeat/Interval settings
-        repeat_frame = tk.LabelFrame(content, text="Repeat Settings", padx=20, pady=20)
-        repeat_frame.pack(fill=tk.X, padx=20, pady=10)
-
-        tk.Label(
-            repeat_frame,
-            text="Configure how many times to click and the interval between clicks:",
-            font=("Arial", 9)
-        ).pack(anchor=tk.W, pady=(0, 5))
-
-        repeat_controls = tk.Frame(repeat_frame)
-        repeat_controls.pack(fill=tk.X, pady=5)
-
-        # Repeat count
-        tk.Label(repeat_controls, text="Repeat Count:", font=("Arial", 9)).pack(side=tk.LEFT, padx=5)
-        self.ai_repeat_var = tk.IntVar(value=1)
-        tk.Spinbox(
-            repeat_controls,
-            from_=1,
-            to=1000,
-            textvariable=self.ai_repeat_var,
-            width=8,
-            font=("Arial", 9)
-        ).pack(side=tk.LEFT, padx=5)
-
-        # Interval
-        tk.Label(repeat_controls, text="Interval (seconds):", font=("Arial", 9)).pack(side=tk.LEFT, padx=(20, 5))
-        self.ai_interval_var = tk.DoubleVar(value=0.0)
-        tk.Spinbox(
-            repeat_controls,
-            from_=0.0,
-            to=60.0,
-            increment=0.5,
-            textvariable=self.ai_interval_var,
-            width=8,
-            font=("Arial", 9)
-        ).pack(side=tk.LEFT, padx=5)
-
-        tk.Label(
-            repeat_frame,
-            text="Example: Repeat=5, Interval=2.0 will click 5 times with 2 seconds between each click",
-            font=("Arial", 8),
-            fg="gray"
-        ).pack(anchor=tk.W, pady=5)
-
-        # Action button
-        action_frame = tk.Frame(content)
-        action_frame.pack(pady=20)
-
-        ai_click_btn = tk.Button(
-            action_frame,
-            text="🎯 Analyze & Click",
-            command=self.ai_click,
-            bg="#9b59b6",
-            fg="white",
-            font=("Arial", 12, "bold"),
-            padx=30,
-            pady=15,
-            cursor="hand2"
-        )
-        ai_click_btn.pack()
-
     def create_image_click_tab(self):
         """Create the image template matching tab"""
         tab, content = self.create_scrollable_tab("🖼 Image Click")
@@ -601,6 +733,49 @@ class AutoClickerGUI:
             pady=10
         )
         instructions.pack()
+
+        # Action buttons (at top)
+        action_frame = tk.Frame(content)
+        action_frame.pack(pady=20)
+
+        self.start_img_click_btn = tk.Button(
+            action_frame,
+            text="▶ Start Image Click",
+            command=self.start_image_click,
+            bg="#27ae60",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            padx=20,
+            pady=10,
+            cursor="hand2"
+        )
+        self.start_img_click_btn.pack(side=tk.LEFT, padx=5)
+
+        self.stop_img_click_btn = tk.Button(
+            action_frame,
+            text="⏹ Stop Image Click",
+            command=self.stop_image_click,
+            bg="#e74c3c",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            padx=20,
+            pady=10,
+            state=tk.DISABLED,
+            cursor="hand2"
+        )
+        self.stop_img_click_btn.pack(side=tk.LEFT, padx=5)
+
+        # Hotkey info
+        hotkey_info = tk.Label(
+            content,
+            text="⌨ Hotkeys: F11 = Start | F12 = Stop",
+            font=("Arial", 9),
+            fg="#3498db",
+            bg="#ecf0f1",
+            padx=10,
+            pady=5
+        )
+        hotkey_info.pack(pady=5)
 
         # Image selection
         image_frame = tk.LabelFrame(content, text="Template Image", padx=20, pady=20)
@@ -736,6 +911,10 @@ class AutoClickerGUI:
 
         self.img_action_mode_var = tk.StringVar(value="click")
 
+        # Create playback variables here so they exist before update_img_action_controls is called
+        self.img_playback_file_var = tk.StringVar()
+        self.img_playback_speed_var = tk.DoubleVar(value=1.0)
+
         tk.Label(
             action_mode_frame,
             text="Choose what to do when image is found:",
@@ -829,23 +1008,6 @@ class AutoClickerGUI:
 
         # Initialize action controls
         self.update_img_action_controls()
-
-        # Action button
-        action_frame = tk.Frame(content)
-        action_frame.pack(pady=20)
-
-        image_click_btn = tk.Button(
-            action_frame,
-            text="🔍 Find & Execute",
-            command=self.image_click,
-            bg="#e67e22",
-            fg="white",
-            font=("Arial", 12, "bold"),
-            padx=30,
-            pady=15,
-            cursor="hand2"
-        )
-        image_click_btn.pack()
 
     def create_screenshot_tab(self):
         """Create the screenshot tab"""
@@ -991,8 +1153,9 @@ class AutoClickerGUI:
             return
 
         try:
-            self.recorder.save_recording(filename)
-            self.log(f"Recording saved to {filename}")
+            # Save with all events - no optimization needed since timing is preserved
+            self.recorder.save_recording(filename, optimize=False)
+            self.log(f"Recording saved to {filename} ({len(self.recorder.events)} events)")
             messagebox.showinfo("Success", f"Recording saved to {filename}")
         except Exception as e:
             self.log(f"Error saving recording: {e}")
@@ -1055,76 +1218,6 @@ class AutoClickerGUI:
 
         threading.Thread(target=playback_thread, daemon=True).start()
 
-    # AI Click methods
-    def ai_click(self):
-        """Use AI to find and click on target"""
-        if not self.api_key:
-            messagebox.showerror(
-                "API Key Missing",
-                "OpenAI API key not configured. Please add it to your .env file."
-            )
-            return
-
-        target = self.ai_target_var.get().strip()
-        if not target:
-            messagebox.showwarning("Input Required", "Please describe what to click")
-            return
-
-        # Parse region if specified
-        region = None
-        try:
-            if all([self.region_x_var.get(), self.region_y_var.get(),
-                   self.region_w_var.get(), self.region_h_var.get()]):
-                region = (
-                    int(self.region_x_var.get()),
-                    int(self.region_y_var.get()),
-                    int(self.region_w_var.get()),
-                    int(self.region_h_var.get())
-                )
-        except ValueError:
-            messagebox.showerror("Invalid Input", "Region values must be integers")
-            return
-
-        # Get monitor selection
-        monitor = self.monitor_var.get()
-        if monitor == 0:
-            monitor = None  # None means all monitors
-
-        # Get repeat/interval settings
-        repeat_count = self.ai_repeat_var.get()
-        interval = self.ai_interval_var.get()
-
-        def ai_click_thread():
-            try:
-                self.log(f"Analyzing screen for: {target}")
-                if monitor:
-                    self.log(f"Using Monitor {monitor}")
-                if repeat_count > 1:
-                    self.log(f"Will click {repeat_count} times with {interval}s interval")
-                self.update_status("Analyzing screenshot with AI...")
-
-                success = self.clicker.click_on_ai_target(
-                    target,
-                    region=region,
-                    monitor=monitor,
-                    repeat_count=repeat_count,
-                    interval=interval
-                )
-
-                if success:
-                    self.log("Target found and clicked!")
-                    self.update_status("AI click successful")
-                    messagebox.showinfo("Success", "Target found and clicked!")
-                else:
-                    self.log("Target not found")
-                    self.update_status("Target not found")
-                    messagebox.showwarning("Not Found", "Could not find the target")
-            except Exception as e:
-                self.log(f"Error during AI click: {e}")
-                messagebox.showerror("Error", f"AI click failed: {e}")
-
-        threading.Thread(target=ai_click_thread, daemon=True).start()
-
     # Image Click methods
     def browse_template_image(self):
         """Browse for template image"""
@@ -1156,7 +1249,7 @@ class AutoClickerGUI:
             file_frame = tk.Frame(self.img_action_controls_frame)
             file_frame.pack(fill=tk.X, pady=5)
 
-            self.img_playback_file_var = tk.StringVar()
+            # Use existing variable instead of creating new one
             filename_entry = tk.Entry(
                 file_frame,
                 textvariable=self.img_playback_file_var,
@@ -1178,7 +1271,7 @@ class AutoClickerGUI:
             speed_frame.pack(fill=tk.X, pady=5)
 
             tk.Label(speed_frame, text="Playback Speed:", font=("Arial", 9)).pack(side=tk.LEFT, padx=5)
-            self.img_playback_speed_var = tk.DoubleVar(value=1.0)
+            # Use existing variable instead of creating new one
             tk.Spinbox(
                 speed_frame,
                 from_=0.1,
@@ -1205,12 +1298,17 @@ class AutoClickerGUI:
         else:
             self.img_repeat_spinbox.config(state='normal')
 
-    def image_click(self):
-        """Find and click on template image"""
+    def start_image_click(self):
+        """Start finding and clicking on template image"""
         image_path = self.template_image_var.get()
         if not image_path:
             messagebox.showwarning("Input Required", "Please select a template image")
             return
+
+        # Disable start button, enable stop button
+        self.start_img_click_btn.config(state=tk.DISABLED)
+        self.stop_img_click_btn.config(state=tk.NORMAL)
+        self.img_click_running = True
 
         confidence = self.confidence_var.get()
 
@@ -1268,27 +1366,45 @@ class AutoClickerGUI:
                     interval=interval,
                     playback_events=playback_events,
                     playback_speed=playback_speed,
-                    unlimited=unlimited
+                    unlimited=unlimited,
+                    stop_flag=lambda: not self.img_click_running
                 )
 
-                if success:
+                # Check if stopped by user before showing results
+                if not self.img_click_running:
+                    # User stopped it, don't show any message
+                    self.log("Image click stopped by user")
+                    self.update_status("Stopped")
+                elif success:
                     if action_mode == "playback":
                         self.log("Image found and recording played!")
                         self.update_status("Image found and recording played")
-                        messagebox.showinfo("Success", "Image found and recording played!")
                     else:
                         self.log("Image found and clicked!")
                         self.update_status("Image click successful")
-                        messagebox.showinfo("Success", "Image found and clicked!")
                 else:
                     self.log("Image not found")
                     self.update_status("Image not found")
-                    messagebox.showwarning("Not Found", "Could not find the image on screen")
             except Exception as e:
                 self.log(f"Error during image click: {e}")
-                messagebox.showerror("Error", f"Image click failed: {e}")
+                self.update_status("Error during image click")
+            finally:
+                # Re-enable buttons when done
+                self.img_click_running = False
+                self.start_img_click_btn.config(state=tk.NORMAL)
+                self.stop_img_click_btn.config(state=tk.DISABLED)
 
         threading.Thread(target=image_click_thread, daemon=True).start()
+
+    def stop_image_click(self):
+        """Stop the image click process"""
+        self.img_click_running = False
+        self.log("Stopping image click...")
+        self.update_status("Image click stopped by user")
+
+        # Re-enable buttons
+        self.start_img_click_btn.config(state=tk.NORMAL)
+        self.stop_img_click_btn.config(state=tk.DISABLED)
 
     # Screenshot methods
     def browse_screenshot_location(self):
@@ -1336,6 +1452,839 @@ class AutoClickerGUI:
         except Exception as e:
             self.log(f"Error capturing screenshot: {e}")
             messagebox.showerror("Error", f"Failed to capture screenshot: {e}")
+
+    def create_alarm_tab(self):
+        """Create the alarm clock tab with support for multiple alarms"""
+        tab, content = self.create_scrollable_tab("⏰ Alarm Clock")
+
+        # Instructions
+        instructions = tk.Label(
+            tab,
+            text="Create multiple alarms to play MP3 files or trigger recordings",
+            font=("Arial", 11),
+            pady=10
+        )
+        instructions.pack()
+
+        # Monitoring status (moved to top)
+        status_frame = tk.LabelFrame(content, text="Monitor Status", padx=20, pady=20)
+        status_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        self.alarm_monitor_status_label = tk.Label(
+            status_frame,
+            text="⚫ Monitoring: OFF",
+            font=("Arial", 12, "bold"),
+            fg="gray"
+        )
+        self.alarm_monitor_status_label.pack(pady=10)
+
+        # Monitor control buttons
+        monitor_btn_frame = tk.Frame(status_frame)
+        monitor_btn_frame.pack(pady=10)
+
+        self.start_monitor_btn = tk.Button(
+            monitor_btn_frame,
+            text="▶ Start Monitoring",
+            command=self.start_alarm_monitor,
+            bg="#27ae60",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            padx=20,
+            pady=10,
+            cursor="hand2"
+        )
+        self.start_monitor_btn.pack(side=tk.LEFT, padx=5)
+
+        self.stop_monitor_btn = tk.Button(
+            monitor_btn_frame,
+            text="⏹ Stop Monitoring",
+            command=self.stop_alarm_monitor,
+            bg="#e74c3c",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            padx=20,
+            pady=10,
+            state=tk.DISABLED,
+            cursor="hand2"
+        )
+        self.stop_monitor_btn.pack(side=tk.LEFT, padx=5)
+
+        # Alarm list section
+        list_frame = tk.LabelFrame(content, text="Alarms", padx=20, pady=20)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        # Alarm listbox with scrollbar
+        listbox_frame = tk.Frame(list_frame)
+        listbox_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        alarm_scrollbar = tk.Scrollbar(listbox_frame)
+        alarm_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.alarm_listbox = tk.Listbox(
+            listbox_frame,
+            yscrollcommand=alarm_scrollbar.set,
+            font=("Arial", 10),
+            height=8,
+            selectmode=tk.SINGLE
+        )
+        self.alarm_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        alarm_scrollbar.config(command=self.alarm_listbox.yview)
+
+        # List action buttons
+        list_btn_frame = tk.Frame(list_frame)
+        list_btn_frame.pack(fill=tk.X, pady=5)
+
+        tk.Button(
+            list_btn_frame,
+            text="➕ Add New Alarm",
+            command=self.show_add_alarm_dialog,
+            bg="#27ae60",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            padx=15,
+            pady=8,
+            cursor="hand2"
+        ).pack(side=tk.LEFT, padx=5)
+
+        tk.Button(
+            list_btn_frame,
+            text="✏ Edit Selected",
+            command=self.edit_selected_alarm,
+            bg="#3498db",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            padx=15,
+            pady=8,
+            cursor="hand2"
+        ).pack(side=tk.LEFT, padx=5)
+
+        tk.Button(
+            list_btn_frame,
+            text="🗑 Delete Selected",
+            command=self.delete_selected_alarm,
+            bg="#e74c3c",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            padx=15,
+            pady=8,
+            cursor="hand2"
+        ).pack(side=tk.LEFT, padx=5)
+
+        tk.Button(
+            list_btn_frame,
+            text="🔄 Toggle On/Off",
+            command=self.toggle_selected_alarm,
+            bg="#f39c12",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            padx=15,
+            pady=8,
+            cursor="hand2"
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Monitoring status
+        status_frame = tk.LabelFrame(content, text="Monitor Status", padx=20, pady=20)
+        status_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        self.alarm_monitor_status_label = tk.Label(
+            status_frame,
+            text="⚫ Monitoring: OFF",
+            font=("Arial", 12, "bold"),
+            fg="gray"
+        )
+        self.alarm_monitor_status_label.pack(pady=10)
+
+        # Monitor control buttons
+        monitor_btn_frame = tk.Frame(status_frame)
+        monitor_btn_frame.pack(pady=10)
+
+        self.start_monitor_btn = tk.Button(
+            monitor_btn_frame,
+            text="▶ Start Monitoring",
+            command=self.start_alarm_monitor,
+            bg="#27ae60",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            padx=20,
+            pady=10,
+            cursor="hand2"
+        )
+        self.start_monitor_btn.pack(side=tk.LEFT, padx=5)
+
+        self.stop_monitor_btn = tk.Button(
+            monitor_btn_frame,
+            text="⏹ Stop Monitoring",
+            command=self.stop_alarm_monitor,
+            bg="#e74c3c",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            padx=20,
+            pady=10,
+            state=tk.DISABLED,
+            cursor="hand2"
+        )
+        self.stop_monitor_btn.pack(side=tk.LEFT, padx=5)
+
+    def refresh_alarm_list(self):
+        """Refresh the alarm list display"""
+        self.alarm_listbox.delete(0, tk.END)
+        for alarm in self.alarms:
+            status = "✓ ON" if alarm['enabled'] else "✗ OFF"
+
+            # Format time with AM/PM
+            hour = alarm['hour']
+            minute = alarm['minute']
+            am_pm = alarm.get('am_pm', 'AM')
+            time_str = f"{hour}:{minute:02d} {am_pm}"
+
+            # Get actions
+            actions = []
+            if alarm.get('play_recording', False):
+                actions.append("Rec")
+            if alarm.get('play_mp3', False):
+                actions.append("MP3")
+            if alarm.get('pause_autoclicker', False):
+                actions.append("Pause")
+            if alarm.get('start_autoclicker', False):
+                actions.append("Start")
+            if alarm.get('click_image', False):
+                actions.append("Img")
+            action_text = "+".join(actions) if actions else "None"
+
+            # Get days
+            days = alarm.get('days', [])
+            if len(days) == 7:
+                days_text = "Every day"
+            elif days:
+                day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+                days_text = ",".join([day_names[d] for d in sorted(days)])
+            else:
+                days_text = "No days"
+
+            display_text = f"{status} | {time_str} | {days_text} | {action_text}"
+            self.alarm_listbox.insert(tk.END, display_text)
+
+    def show_add_alarm_dialog(self):
+        """Show dialog to add a new alarm"""
+        self.show_alarm_dialog(mode="add")
+
+    def edit_selected_alarm(self):
+        """Edit the selected alarm"""
+        selection = self.alarm_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select an alarm to edit")
+            return
+
+        index = selection[0]
+        self.show_alarm_dialog(mode="edit", alarm_index=index)
+
+    def delete_selected_alarm(self):
+        """Delete the selected alarm"""
+        selection = self.alarm_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select an alarm to delete")
+            return
+
+        if messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this alarm?"):
+            index = selection[0]
+            del self.alarms[index]
+            self.refresh_alarm_list()
+            self.log("Alarm deleted")
+            self.save_alarms()
+
+    def toggle_selected_alarm(self):
+        """Toggle the selected alarm on/off"""
+        selection = self.alarm_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select an alarm to toggle")
+            return
+
+        index = selection[0]
+        self.alarms[index]['enabled'] = not self.alarms[index]['enabled']
+        self.refresh_alarm_list()
+        status = "enabled" if self.alarms[index]['enabled'] else "disabled"
+        self.log(f"Alarm {status}")
+        self.save_alarms()
+
+    def show_alarm_dialog(self, mode="add", alarm_index=None):
+        """Show dialog for adding or editing an alarm with enhanced features"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Add Alarm" if mode == "add" else "Edit Alarm")
+        dialog.geometry("500x650")
+        dialog.resizable(True, True)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # If editing, load existing alarm data
+        if mode == "edit" and alarm_index is not None:
+            alarm = self.alarms[alarm_index]
+        else:
+            alarm = None
+
+        # Create canvas with scrollbar for scrollable content
+        canvas = tk.Canvas(dialog)
+        scrollbar = tk.Scrollbar(dialog, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Enable mouse wheel scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # Time settings (12-hour format with AM/PM)
+        time_frame = tk.LabelFrame(scrollable_frame, text="Time (12-hour format)", padx=15, pady=10)
+        time_frame.pack(fill=tk.X, padx=15, pady=5)
+
+        time_inputs = tk.Frame(time_frame)
+        time_inputs.pack()
+
+        tk.Label(time_inputs, text="Hour:", font=("Arial", 9)).pack(side=tk.LEFT, padx=3)
+        hour_var = tk.IntVar(value=alarm.get('hour', 12) if alarm else 12)
+        tk.Spinbox(
+            time_inputs,
+            from_=1,
+            to=12,
+            textvariable=hour_var,
+            width=4,
+            font=("Arial", 9)
+        ).pack(side=tk.LEFT, padx=3)
+
+        tk.Label(time_inputs, text="Minute:", font=("Arial", 9)).pack(side=tk.LEFT, padx=(10, 3))
+        minute_var = tk.IntVar(value=alarm.get('minute', 0) if alarm else 0)
+        tk.Spinbox(
+            time_inputs,
+            from_=0,
+            to=59,
+            textvariable=minute_var,
+            width=4,
+            font=("Arial", 9)
+        ).pack(side=tk.LEFT, padx=3)
+
+        am_pm_var = tk.StringVar(value=alarm.get('am_pm', 'AM') if alarm else 'AM')
+        am_pm_combo = ttk.Combobox(
+            time_inputs,
+            textvariable=am_pm_var,
+            values=["AM", "PM"],
+            state="readonly",
+            width=4,
+            font=("Arial", 9)
+        )
+        am_pm_combo.pack(side=tk.LEFT, padx=(10, 3))
+
+        # Day selection
+        day_frame = tk.LabelFrame(scrollable_frame, text="Repeat on Days", padx=15, pady=10)
+        day_frame.pack(fill=tk.X, padx=15, pady=5)
+
+        day_vars = []
+        day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        days_grid = tk.Frame(day_frame)
+        days_grid.pack()
+
+        for i, day_name in enumerate(day_names):
+            var = tk.BooleanVar(value=i in alarm.get('days', []) if alarm else False)
+            day_vars.append(var)
+            tk.Checkbutton(
+                days_grid,
+                text=day_name,
+                variable=var,
+                font=("Arial", 9)
+            ).grid(row=i // 2, column=i % 2, sticky=tk.W, padx=10, pady=2)
+
+        # Select all/none buttons
+        select_btns = tk.Frame(day_frame)
+        select_btns.pack(pady=5)
+
+        def select_all_days():
+            for var in day_vars:
+                var.set(True)
+
+        def select_no_days():
+            for var in day_vars:
+                var.set(False)
+
+        tk.Button(select_btns, text="All", command=select_all_days, width=6, font=("Arial", 8)).pack(side=tk.LEFT, padx=3)
+        tk.Button(select_btns, text="None", command=select_no_days, width=6, font=("Arial", 8)).pack(side=tk.LEFT, padx=3)
+
+        # Actions (checkboxes for multiple actions)
+        action_frame = tk.LabelFrame(scrollable_frame, text="Actions (Select one or more)", padx=15, pady=10)
+        action_frame.pack(fill=tk.X, padx=15, pady=5)
+
+        play_recording_var = tk.BooleanVar(value=alarm.get('play_recording', False) if alarm else False)
+        play_mp3_var = tk.BooleanVar(value=alarm.get('play_mp3', False) if alarm else False)
+        pause_autoclicker_var = tk.BooleanVar(value=alarm.get('pause_autoclicker', False) if alarm else False)
+        start_autoclicker_var = tk.BooleanVar(value=alarm.get('start_autoclicker', False) if alarm else False)
+        click_image_var = tk.BooleanVar(value=alarm.get('click_image', False) if alarm else False)
+
+        tk.Checkbutton(
+            action_frame,
+            text="Play Recording",
+            variable=play_recording_var,
+            font=("Arial", 8)
+        ).pack(anchor=tk.W, pady=1)
+
+        tk.Checkbutton(
+            action_frame,
+            text="Play MP3 File",
+            variable=play_mp3_var,
+            font=("Arial", 8)
+        ).pack(anchor=tk.W, pady=1)
+
+        tk.Checkbutton(
+            action_frame,
+            text="Pause Autoclicker",
+            variable=pause_autoclicker_var,
+            font=("Arial", 8)
+        ).pack(anchor=tk.W, pady=1)
+
+        tk.Checkbutton(
+            action_frame,
+            text="Start Autoclicker",
+            variable=start_autoclicker_var,
+            font=("Arial", 8)
+        ).pack(anchor=tk.W, pady=1)
+
+        tk.Checkbutton(
+            action_frame,
+            text="Click on Image",
+            variable=click_image_var,
+            font=("Arial", 8)
+        ).pack(anchor=tk.W, pady=1)
+
+        # Recording file selection
+        recording_frame = tk.LabelFrame(scrollable_frame, text="Recording File", padx=15, pady=8)
+        recording_frame.pack(fill=tk.X, padx=15, pady=3)
+
+        recording_file_var = tk.StringVar(value=alarm.get('recording_file', '') if alarm else '')
+
+        recording_entry_frame = tk.Frame(recording_frame)
+        recording_entry_frame.pack(fill=tk.X, pady=3)
+
+        tk.Entry(
+            recording_entry_frame,
+            textvariable=recording_file_var,
+            font=("Arial", 8),
+            state='readonly'
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
+
+        def browse_recording():
+            filename = filedialog.askopenfilename(
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+            )
+            if filename:
+                recording_file_var.set(filename)
+
+        tk.Button(
+            recording_entry_frame,
+            text="Browse...",
+            command=browse_recording,
+            font=("Arial", 8),
+            cursor="hand2"
+        ).pack(side=tk.LEFT)
+
+        # MP3 file selection
+        mp3_frame = tk.LabelFrame(scrollable_frame, text="MP3 File", padx=15, pady=8)
+        mp3_frame.pack(fill=tk.X, padx=15, pady=3)
+
+        mp3_file_var = tk.StringVar(value=alarm.get('mp3_file', '') if alarm else '')
+
+        mp3_entry_frame = tk.Frame(mp3_frame)
+        mp3_entry_frame.pack(fill=tk.X, pady=3)
+
+        tk.Entry(
+            mp3_entry_frame,
+            textvariable=mp3_file_var,
+            font=("Arial", 8),
+            state='readonly'
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
+
+        def browse_mp3():
+            filename = filedialog.askopenfilename(
+                filetypes=[
+                    ("MP3 files", "*.mp3"),
+                    ("All audio files", "*.mp3 *.wav *.ogg"),
+                    ("All files", "*.*")
+                ]
+            )
+            if filename:
+                mp3_file_var.set(filename)
+
+        tk.Button(
+            mp3_entry_frame,
+            text="Browse...",
+            command=browse_mp3,
+            font=("Arial", 8),
+            cursor="hand2"
+        ).pack(side=tk.LEFT)
+
+        # Image file selection
+        image_frame = tk.LabelFrame(scrollable_frame, text="Image File (for Click on Image)", padx=15, pady=8)
+        image_frame.pack(fill=tk.X, padx=15, pady=3)
+
+        image_file_var = tk.StringVar(value=alarm.get('image_file', '') if alarm else '')
+
+        image_entry_frame = tk.Frame(image_frame)
+        image_entry_frame.pack(fill=tk.X, pady=3)
+
+        tk.Entry(
+            image_entry_frame,
+            textvariable=image_file_var,
+            font=("Arial", 8),
+            state='readonly'
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
+
+        def browse_image():
+            filename = filedialog.askopenfilename(
+                filetypes=[
+                    ("Image files", "*.png *.jpg *.jpeg *.bmp"),
+                    ("PNG files", "*.png"),
+                    ("JPEG files", "*.jpg *.jpeg"),
+                    ("All files", "*.*")
+                ]
+            )
+            if filename:
+                image_file_var.set(filename)
+
+        tk.Button(
+            image_entry_frame,
+            text="Browse...",
+            command=browse_image,
+            font=("Arial", 8),
+            cursor="hand2"
+        ).pack(side=tk.LEFT)
+
+        # Monitor selection for image search
+        monitor_select_frame = tk.Frame(image_frame)
+        monitor_select_frame.pack(fill=tk.X, pady=3)
+
+        tk.Label(monitor_select_frame, text="Monitor:", font=("Arial", 8)).pack(side=tk.LEFT, padx=(0, 5))
+
+        image_monitor_var = tk.IntVar(value=alarm.get('image_monitor', 0) if alarm else 0)
+
+        monitor_options = ["All Monitors"] + [f"Monitor {i+1}" for i in range(len(self.analyzer.get_monitors()))]
+        image_monitor_combo = ttk.Combobox(
+            monitor_select_frame,
+            values=monitor_options,
+            state='readonly',
+            font=("Arial", 8),
+            width=15
+        )
+        image_monitor_combo.current(image_monitor_var.get())
+        image_monitor_combo.pack(side=tk.LEFT)
+
+        def on_monitor_change(event):
+            selected_index = image_monitor_combo.current()
+            image_monitor_var.set(selected_index)
+
+        image_monitor_combo.bind('<<ComboboxSelected>>', on_monitor_change)
+
+        # Playback speed
+        speed_frame = tk.LabelFrame(scrollable_frame, text="Recording Playback Speed", padx=15, pady=8)
+        speed_frame.pack(fill=tk.X, padx=15, pady=3)
+
+        speed_var = tk.DoubleVar(value=alarm.get('speed', 1.0) if alarm else 1.0)
+
+        speed_inputs = tk.Frame(speed_frame)
+        speed_inputs.pack()
+
+        tk.Label(speed_inputs, text="Speed:", font=("Arial", 8)).pack(side=tk.LEFT, padx=3)
+        tk.Spinbox(
+            speed_inputs,
+            from_=0.1,
+            to=10.0,
+            increment=0.1,
+            textvariable=speed_var,
+            width=6,
+            font=("Arial", 8)
+        ).pack(side=tk.LEFT, padx=3)
+        tk.Label(speed_inputs, text="x", font=("Arial", 8)).pack(side=tk.LEFT)
+
+        # Pack canvas and scrollbar
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Save button
+        def save_alarm():
+            # Unbind mousewheel before closing
+            canvas.unbind_all("<MouseWheel>")
+
+            # Validate that at least one action is selected
+            if not (play_recording_var.get() or play_mp3_var.get() or pause_autoclicker_var.get() or start_autoclicker_var.get()):
+                messagebox.showwarning("No Action Selected", "Please select at least one action")
+                return
+
+            # Validate files for selected actions
+            if play_recording_var.get() and not recording_file_var.get():
+                messagebox.showwarning("Input Required", "Please select a recording file")
+                return
+
+            if play_mp3_var.get() and not mp3_file_var.get():
+                messagebox.showwarning("Input Required", "Please select an MP3 file")
+                return
+
+            # Get selected days
+            selected_days = [i for i, var in enumerate(day_vars) if var.get()]
+            if not selected_days:
+                messagebox.showwarning("No Days Selected", "Please select at least one day")
+                return
+
+            # Check if time was changed when editing
+            time_changed = False
+            if alarm:
+                old_hour = alarm.get('hour')
+                old_minute = alarm.get('minute')
+                old_am_pm = alarm.get('am_pm')
+                new_hour = hour_var.get()
+                new_minute = minute_var.get()
+                new_am_pm = am_pm_var.get()
+
+                if old_hour != new_hour or old_minute != new_minute or old_am_pm != new_am_pm:
+                    time_changed = True
+
+            alarm_data = {
+                'hour': hour_var.get(),
+                'minute': minute_var.get(),
+                'am_pm': am_pm_var.get(),
+                'days': selected_days,
+                'play_recording': play_recording_var.get(),
+                'play_mp3': play_mp3_var.get(),
+                'pause_autoclicker': pause_autoclicker_var.get(),
+                'start_autoclicker': start_autoclicker_var.get(),
+                'click_image': click_image_var.get(),
+                'recording_file': recording_file_var.get(),
+                'mp3_file': mp3_file_var.get(),
+                'image_file': image_file_var.get(),
+                'image_monitor': image_monitor_var.get(),
+                'speed': speed_var.get(),
+                'enabled': alarm['enabled'] if alarm else True,
+                # Clear triggered_today if time was changed, otherwise keep it
+                'triggered_today': {} if time_changed else (alarm.get('triggered_today', {}) if alarm else {})
+            }
+
+            if mode == "add":
+                self.alarms.append(alarm_data)
+                self.log(f"Alarm added: {hour_var.get()}:{minute_var.get():02d} {am_pm_var.get()}")
+            else:
+                self.alarms[alarm_index] = alarm_data
+                if time_changed:
+                    self.log(f"Alarm updated: {hour_var.get()}:{minute_var.get():02d} {am_pm_var.get()} (trigger flag cleared)")
+                else:
+                    self.log(f"Alarm updated: {hour_var.get()}:{minute_var.get():02d} {am_pm_var.get()}")
+
+            self.refresh_alarm_list()
+            self.save_alarms()
+            dialog.destroy()
+
+        def cancel_dialog():
+            canvas.unbind_all("<MouseWheel>")
+            dialog.destroy()
+
+        btn_frame = tk.Frame(scrollable_frame)
+        btn_frame.pack(pady=15)
+
+        tk.Button(
+            btn_frame,
+            text="💾 Save Alarm",
+            command=save_alarm,
+            bg="#27ae60",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            padx=20,
+            pady=10,
+            cursor="hand2"
+        ).pack(side=tk.LEFT, padx=5)
+
+        tk.Button(
+            btn_frame,
+            text="Cancel",
+            command=cancel_dialog,
+            bg="#95a5a6",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            padx=15,
+            pady=8,
+            cursor="hand2"
+        ).pack(side=tk.LEFT, padx=5)
+
+    def start_alarm_monitor(self):
+        """Start monitoring all alarms"""
+        if not self.alarms:
+            messagebox.showwarning("No Alarms", "Please add at least one alarm first")
+            return
+
+        enabled_count = sum(1 for alarm in self.alarms if alarm['enabled'])
+        if enabled_count == 0:
+            messagebox.showwarning("No Enabled Alarms", "Please enable at least one alarm")
+            return
+
+        self.alarm_monitor_running = True
+        self.start_monitor_btn.config(state=tk.DISABLED)
+        self.stop_monitor_btn.config(state=tk.NORMAL)
+        self.alarm_monitor_status_label.config(text=f"✓ Monitoring: ON ({enabled_count} active)", fg="#27ae60")
+
+        self.log(f"Alarm monitoring started ({enabled_count} alarms active)")
+        self.update_status(f"Monitoring {enabled_count} alarms")
+
+        def monitor_thread_func():
+            import time as time_module
+            while self.alarm_monitor_running:
+                now = datetime.now()
+                current_hour_24 = now.hour
+                current_minute = now.minute
+                current_weekday = now.weekday()  # 0=Monday, 6=Sunday
+
+                for alarm in self.alarms:
+                    if not alarm['enabled']:
+                        continue
+
+                    # Check if today is a scheduled day
+                    if current_weekday not in alarm.get('days', []):
+                        continue
+
+                    # Convert alarm time from 12-hour to 24-hour format
+                    alarm_hour_12 = alarm['hour']
+                    am_pm = alarm.get('am_pm', 'AM')
+
+                    if am_pm == 'PM' and alarm_hour_12 != 12:
+                        alarm_hour_24 = alarm_hour_12 + 12
+                    elif am_pm == 'AM' and alarm_hour_12 == 12:
+                        alarm_hour_24 = 0
+                    else:
+                        alarm_hour_24 = alarm_hour_12
+
+                    alarm_minute = alarm['minute']
+
+                    # Create unique trigger key for today
+                    trigger_key = f"{now.year}-{now.month}-{now.day}"
+
+                    # Get triggered_today dict (create if doesn't exist)
+                    if 'triggered_today' not in alarm:
+                        alarm['triggered_today'] = {}
+
+                    # Check if it's time to trigger
+                    if (current_hour_24 == alarm_hour_24 and
+                        current_minute == alarm_minute and
+                        alarm['triggered_today'].get(trigger_key, False) == False):
+
+                        # Trigger alarm
+                        time_str = f"{alarm_hour_12}:{alarm_minute:02d} {am_pm}"
+                        self.log(f"ALARM! Triggering: {time_str}")
+
+                        # Execute all selected actions
+                        if alarm.get('play_mp3', False):
+                            self.play_mp3(alarm.get('mp3_file', ''))
+
+                        if alarm.get('play_recording', False):
+                            self.play_alarm_recording(
+                                alarm.get('recording_file', ''),
+                                alarm.get('speed', 1.0)
+                            )
+
+                        if alarm.get('pause_autoclicker', False):
+                            if self.img_click_running:
+                                self.stop_image_click()
+                                self.log("Image Click stopped by alarm")
+
+                        # Execute Click on Image first (if enabled)
+                        image_found = False
+                        if alarm.get('click_image', False):
+                            image_file = alarm.get('image_file', '')
+                            if image_file:
+                                # Get monitor selection (0 = all, 1+ = specific monitor)
+                                monitor_index = alarm.get('image_monitor', 0)
+                                monitor = None if monitor_index == 0 else monitor_index
+
+                                # Search for image with 5 attempts (not unlimited)
+                                self.log(f"Alarm searching for image (max 5 attempts)...")
+                                image_found = self.find_and_click_image(image_file, 0.8, monitor, max_retries=5, retry_interval=2.0)
+
+                                if not image_found:
+                                    self.log("Image not found after 5 attempts, alarm actions completed")
+                            else:
+                                self.log("Click on Image action selected but no image file specified")
+
+                        # Only start autoclicker if no click_image OR if image was found
+                        if alarm.get('start_autoclicker', False):
+                            # If click_image is enabled, only start if image was found
+                            if alarm.get('click_image', False):
+                                if image_found:
+                                    if not self.img_click_running and hasattr(self, 'start_img_click_btn') and self.start_img_click_btn['state'] == tk.NORMAL:
+                                        self.start_image_click()
+                                        self.log("Image Click started by alarm (image was found)")
+                                else:
+                                    self.log("Skipping start autoclicker - image was not found")
+                            else:
+                                # No click_image action, start autoclicker normally
+                                if not self.img_click_running and hasattr(self, 'start_img_click_btn') and self.start_img_click_btn['state'] == tk.NORMAL:
+                                    self.start_image_click()
+                                    self.log("Image Click started by alarm")
+
+                        # Mark as triggered for today
+                        alarm['triggered_today'][trigger_key] = True
+                        self.save_alarms()  # Save trigger state
+
+                    # Clean up old trigger keys (keep only last 2 days)
+                    if alarm.get('triggered_today'):
+                        keys_to_remove = []
+                        for key in alarm['triggered_today']:
+                            try:
+                                year, month, day = map(int, key.split('-'))
+                                trigger_date = datetime(year, month, day)
+                                days_ago = (now - trigger_date).days
+                                if days_ago > 1:
+                                    keys_to_remove.append(key)
+                            except:
+                                pass
+                        for key in keys_to_remove:
+                            del alarm['triggered_today'][key]
+
+                time_module.sleep(1)  # Check every second
+
+        self.alarm_monitor_thread = threading.Thread(target=monitor_thread_func, daemon=True)
+        self.alarm_monitor_thread.start()
+
+    def stop_alarm_monitor(self):
+        """Stop monitoring all alarms"""
+        self.alarm_monitor_running = False
+        self.start_monitor_btn.config(state=tk.NORMAL)
+        self.stop_monitor_btn.config(state=tk.DISABLED)
+        self.alarm_monitor_status_label.config(text="⚫ Monitoring: OFF", fg="gray")
+
+        self.log("Alarm monitoring stopped")
+        self.update_status("Alarm monitoring stopped")
+
+    def play_mp3(self, mp3_file):
+        """Play an MP3 file"""
+        try:
+            import pygame
+            pygame.mixer.init()
+            pygame.mixer.music.load(mp3_file)
+            pygame.mixer.music.play()
+            self.log(f"Playing MP3: {mp3_file}")
+        except Exception as e:
+            self.log(f"Error playing MP3: {e}")
+
+    def play_alarm_recording(self, recording_file, speed=1.0):
+        """Play a recording file for alarm"""
+        try:
+            with open(recording_file, 'r') as f:
+                data = json.load(f)
+                events = data['events']
+
+            self.log(f"Playing recording: {recording_file}")
+
+            # Play the recording
+            self.clicker.play_recording(events, speed=speed)
+        except Exception as e:
+            self.log(f"Error playing recording: {e}")
 
     # Utility methods
     def show_monitor_preview(self):
@@ -1423,12 +2372,22 @@ class AutoClickerGUI:
             self.log(f"Error creating monitor preview: {e}")
 
     def log(self, message):
-        """Add message to log"""
+        """Add message to log and write to file"""
         timestamp = datetime.now().strftime("%H:%M:%S")
+        full_message = f"[{timestamp}] {message}\n"
+
+        # Log to GUI
         self.log_text.config(state=tk.NORMAL)
-        self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
+        self.log_text.insert(tk.END, full_message)
         self.log_text.see(tk.END)
         self.log_text.config(state=tk.DISABLED)
+
+        # Log to file
+        try:
+            with open("autoclicker_log.txt", "a", encoding="utf-8") as log_file:
+                log_file.write(full_message)
+        except Exception as e:
+            print(f"Error writing to log file: {e}")
 
     def update_status(self, message):
         """Update status bar"""

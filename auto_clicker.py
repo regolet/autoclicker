@@ -9,60 +9,75 @@ from screenshot_analyzer import ScreenshotAnalyzer
 
 
 class AutoClicker:
-    def __init__(self, api_key=None):
+    def __init__(self):
         """
         Initialize the auto clicker
-
-        Args:
-            api_key: OpenAI API key for AI-based analysis
         """
         self.mouse = Controller()
-        self.analyzer = ScreenshotAnalyzer(api_key)
+        self.analyzer = ScreenshotAnalyzer()
         pyautogui.FAILSAFE = True  # Move mouse to corner to abort
         pyautogui.PAUSE = 0.1  # Short pause between actions
 
-    def play_recording(self, events, speed=1.0):
+    def play_recording(self, events, speed=1.0, skip_moves=False, skip_delay=False, instant=False):
         """
         Play back recorded mouse events
 
         Args:
             events: List of recorded events
             speed: Playback speed multiplier (1.0 = normal, 2.0 = double speed, etc.)
+            skip_moves: If True, skip move events and only execute clicks/scrolls (default: False)
+            skip_delay: If True, skip the 2-second preparation delay (default: False)
+            instant: If True, execute all events instantly without timing delays (default: False)
         """
-        print(f"Starting playback of {len(events)} events...")
-        print("Move mouse to top-left corner to abort (FAILSAFE)")
+        print(f"Starting playback of {len(events)} events (skip_moves={skip_moves}, instant={instant})...")
+        if not skip_delay:
+            print("Move mouse to top-left corner to abort (FAILSAFE)")
+            time.sleep(2)  # Give user time to prepare
 
-        time.sleep(2)  # Give user time to prepare
+        # Disable pyautogui pause to avoid extra delays
+        original_pause = pyautogui.PAUSE
+        pyautogui.PAUSE = 0
 
         last_timestamp = 0
+        events_executed = 0
 
         for i, event in enumerate(events):
-            # Calculate delay
-            if event['timestamp'] > last_timestamp:
+            # Skip move events if requested
+            if skip_moves and event['type'] == 'move':
+                continue
+
+            # Calculate delay (only if not in instant mode)
+            if not instant and event['timestamp'] > last_timestamp:
                 delay = (event['timestamp'] - last_timestamp) / speed
                 time.sleep(delay)
 
             # Execute event
             if event['type'] == 'move':
-                pyautogui.moveTo(event['x'], event['y'])
+                # Use duration=0 for instant movement (no animation)
+                pyautogui.moveTo(event['x'], event['y'], duration=0)
+                events_executed += 1
 
             elif event['type'] == 'click':
                 button = Button.left if event['button'] == 'left' else Button.right
                 self.mouse.position = (event['x'], event['y'])
                 self.mouse.click(button, 1)
                 print(f"Clicked at ({event['x']}, {event['y']})")
+                events_executed += 1
 
             elif event['type'] == 'scroll':
                 self.mouse.position = (event['x'], event['y'])
                 self.mouse.scroll(event['dx'], event['dy'])
+                events_executed += 1
 
             last_timestamp = event['timestamp']
 
             # Progress update
-            if (i + 1) % 100 == 0:
-                print(f"Progress: {i + 1}/{len(events)} events")
+            if events_executed > 0 and events_executed % 100 == 0:
+                print(f"Progress: {events_executed} events executed")
 
-        print("Playback completed!")
+        # Restore original pause setting
+        pyautogui.PAUSE = original_pause
+        print(f"Playback completed! Executed {events_executed} events")
 
     def click_at_position(self, x, y, button='left', clicks=1):
         """
@@ -76,68 +91,7 @@ class AutoClicker:
         pyautogui.click(x, y, clicks=clicks, button=button)
         print(f"Clicked at ({x}, {y})")
 
-    def click_on_ai_target(self, target_description, region=None, monitor=None, repeat_count=1, interval=0):
-        """
-        Use AI to find and click on a target
-
-        Args:
-            target_description: What to look for (e.g., "the submit button")
-            region: Optional screen region to search in (x, y, width, height)
-            monitor: Monitor number (1, 2, etc.) or None for all monitors
-            repeat_count: Number of times to repeat the click (default: 1)
-            interval: Seconds between repeated clicks (default: 0)
-
-        Returns:
-            True if found and clicked, False otherwise
-        """
-        print(f"Analyzing screen for: {target_description}")
-
-        # Capture screenshot with monitor support
-        screenshot = self.analyzer.capture_screenshot(region=region, monitor=monitor)
-
-        # Analyze with AI
-        result = self.analyzer.analyze_screenshot_with_ai(screenshot, target_description)
-
-        if result.get('found'):
-            x, y = result['x'], result['y']
-            confidence = result.get('confidence', 0)
-
-            print(f"Target found at ({x}, {y}) with confidence {confidence:.2f}")
-            print(f"Description: {result.get('description', 'N/A')}")
-
-            # Highlight the target (optional, for debugging)
-            self.analyzer.highlight_target(screenshot, x, y, 'target_found.png')
-
-            # Adjust coordinates if region was specified
-            if region:
-                x += region[0]
-                y += region[1]
-
-            # Adjust coordinates if monitor was specified
-            if monitor is not None:
-                monitors = self.analyzer.get_monitors()
-                if monitor > 0 and monitor <= len(monitors):
-                    mon = monitors[monitor - 1]
-                    x += mon['left']
-                    y += mon['top']
-
-            # Click on the target (with repeat if specified)
-            time.sleep(0.5)
-            for i in range(repeat_count):
-                self.click_at_position(x, y)
-                if i < repeat_count - 1 and interval > 0:
-                    print(f"Waiting {interval} seconds before next click...")
-                    time.sleep(interval)
-
-            if repeat_count > 1:
-                print(f"Completed {repeat_count} clicks")
-
-            return True
-        else:
-            print(f"Target not found: {result.get('error', 'Unknown error')}")
-            return False
-
-    def click_on_image(self, template_image_path, confidence=0.8, monitor=None, repeat_count=1, interval=0, playback_events=None, playback_speed=1.0, unlimited=False):
+    def click_on_image(self, template_image_path, confidence=0.8, monitor=None, repeat_count=1, interval=0, playback_events=None, playback_speed=1.0, unlimited=False, stop_flag=None):
         """
         Find and click on a template image using OpenCV matching
 
@@ -150,6 +104,7 @@ class AutoClicker:
             playback_events: If provided, plays back these recorded events instead of simple click
             playback_speed: Speed multiplier for playback (default: 1.0)
             unlimited: If True, repeats indefinitely until manually stopped (default: False)
+            stop_flag: A callable that returns True when the process should stop (default: None)
 
         Returns:
             True if found and action performed, False otherwise
@@ -158,11 +113,31 @@ class AutoClicker:
         max_iterations = float('inf') if unlimited else repeat_count
 
         while iteration < max_iterations:
+            # Check if we should stop
+            if stop_flag and stop_flag():
+                print("Stopping image click - stop flag set")
+                return False
             iteration += 1
 
             print(f"Searching for image: {template_image_path} (iteration {iteration}{'...' if unlimited else f'/{repeat_count}'})")
 
-            result = self.analyzer.find_image_on_screen(template_image_path, confidence, monitor=monitor)
+            # Add small delay before screenshot to prevent rapid capture errors
+            if iteration > 1:
+                time.sleep(0.1)
+
+            # Try to find image with retry on error
+            result = None
+            for retry in range(3):
+                try:
+                    result = self.analyzer.find_image_on_screen(template_image_path, confidence, monitor=monitor)
+                    break  # Success, exit retry loop
+                except Exception as e:
+                    if retry < 2:
+                        print(f"Error searching for image (attempt {retry + 1}/3): {e}. Retrying...")
+                        time.sleep(0.5)
+                    else:
+                        print(f"Failed to search for image after 3 attempts: {e}")
+                        raise
 
             if result:
                 x, y, match_confidence = result
@@ -182,15 +157,20 @@ class AutoClicker:
                 if playback_events:
                     # Playback recorded mouse movements
                     print(f"Playing back recorded actions...")
-                    self.play_recording(playback_events, speed=playback_speed)
+                    # Use normal playback with timing to match original recording duration
+                    self.play_recording(playback_events, speed=playback_speed, skip_moves=False, skip_delay=True, instant=False)
                 else:
                     # Simple click
                     self.click_at_position(x, y)
 
                 # If more iterations to go, wait the interval before searching again
-                if iteration < max_iterations and interval > 0:
-                    print(f"Waiting {interval} seconds before next search...")
-                    time.sleep(interval)
+                if iteration < max_iterations:
+                    if interval > 0:
+                        print(f"Waiting {interval} seconds before next search...")
+                        time.sleep(interval)
+                    else:
+                        # Add minimum delay to prevent errors from rapid successive searches
+                        time.sleep(0.1)
                 elif iteration >= max_iterations:
                     print(f"Completed {iteration} iterations")
                     break

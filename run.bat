@@ -1,4 +1,4 @@
 @echo off
-echo Starting AI-Powered Auto Clicker GUI...
-python gui.py
-pause
+REM Starting AI-Powered Auto Clicker GUI (hidden command window)
+wscript run_hidden.vbs
+exit
