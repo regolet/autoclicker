@@ -72,28 +72,58 @@ class ScreenshotAnalyzer:
         Returns:
             Tuple (x, y, confidence) of the center of the found image, or None
         """
-        # Capture current screen with monitor support
-        screenshot = self.capture_screenshot(monitor=monitor)
-        screenshot_np = np.array(screenshot)
-        screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
-
         # Load template
         template = cv2.imread(template_image_path, cv2.IMREAD_GRAYSCALE)
         if template is None:
             raise ValueError(f"Could not load template image: {template_image_path}")
 
-        # Perform template matching
-        result = cv2.matchTemplate(screenshot_gray, template, cv2.TM_CCOEFF_NORMED)
-        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+        if monitor is None:
+            # Search all monitors individually and return the best match
+            best_match = None
+            best_confidence = 0
 
-        if max_val >= confidence:
-            # Get center of the found template
-            template_h, template_w = template.shape
-            center_x = max_loc[0] + template_w // 2
-            center_y = max_loc[1] + template_h // 2
-            return (center_x, center_y, max_val)
+            with mss() as sct:
+                monitors = sct.monitors[1:]  # Skip combined screen
+
+                for idx, mon in enumerate(monitors, 1):
+                    # Capture this monitor
+                    screenshot = sct.grab(mon)
+                    screenshot_img = Image.frombytes('RGB', screenshot.size, screenshot.rgb)
+                    screenshot_np = np.array(screenshot_img)
+                    screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
+
+                    # Perform template matching
+                    result = cv2.matchTemplate(screenshot_gray, template, cv2.TM_CCOEFF_NORMED)
+                    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+
+                    if max_val >= confidence and max_val > best_confidence:
+                        # Get center of the found template
+                        template_h, template_w = template.shape
+                        # Add monitor offset to get absolute coordinates
+                        center_x = mon['left'] + max_loc[0] + template_w // 2
+                        center_y = mon['top'] + max_loc[1] + template_h // 2
+                        best_match = (center_x, center_y, max_val)
+                        best_confidence = max_val
+
+            return best_match
         else:
-            return None
+            # Search specific monitor using pyautogui approach (works with relative coordinates)
+            screenshot = self.capture_screenshot(monitor=monitor)
+            screenshot_np = np.array(screenshot)
+            screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
+
+            # Perform template matching
+            result = cv2.matchTemplate(screenshot_gray, template, cv2.TM_CCOEFF_NORMED)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+
+            if max_val >= confidence:
+                # Get center of the found template
+                template_h, template_w = template.shape
+                center_x = max_loc[0] + template_w // 2
+                center_y = max_loc[1] + template_h // 2
+                return (center_x, center_y, max_val)
+            else:
+                return None
 
     def get_monitor_thumbnails(self, max_width=200):
         """

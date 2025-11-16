@@ -91,7 +91,7 @@ class AutoClicker:
         pyautogui.click(x, y, clicks=clicks, button=button)
         print(f"Clicked at ({x}, {y})")
 
-    def click_on_image(self, template_image_path, confidence=0.8, monitor=None, repeat_count=1, interval=0, playback_events=None, playback_speed=1.0, unlimited=False, stop_flag=None):
+    def click_on_image(self, template_image_path, confidence=0.8, monitor=None, repeat_count=1, interval=0, playback_events=None, playback_speed=1.0, unlimited=False, retry_on_not_found=False, stop_flag=None, log_callback=None):
         """
         Find and click on a template image using OpenCV matching
 
@@ -104,15 +104,18 @@ class AutoClicker:
             playback_events: If provided, plays back these recorded events instead of simple click
             playback_speed: Speed multiplier for playback (default: 1.0)
             unlimited: If True, repeats indefinitely until manually stopped (default: False)
+            retry_on_not_found: If True, keeps retrying when image not found instead of stopping (default: False)
             stop_flag: A callable that returns True when the process should stop (default: None)
+            log_callback: Optional callback function to log messages to GUI (default: None)
 
         Returns:
             True if found and action performed, False otherwise
         """
         iteration = 0
+        successful_iterations = 0
         max_iterations = float('inf') if unlimited else repeat_count
 
-        while iteration < max_iterations:
+        while successful_iterations < max_iterations:
             # Check if we should stop
             if stop_flag and stop_flag():
                 print("Stopping image click - stop flag set")
@@ -141,7 +144,10 @@ class AutoClicker:
 
             if result:
                 x, y, match_confidence = result
-                print(f"Image found at ({x}, {y}) with confidence {match_confidence:.2f}")
+                msg = f"Image found at ({x}, {y}) with confidence {match_confidence:.2f}"
+                print(msg)
+                if log_callback:
+                    log_callback(msg)
 
                 # Adjust coordinates if monitor was specified
                 if monitor is not None:
@@ -156,35 +162,71 @@ class AutoClicker:
                 # Perform action based on mode
                 if playback_events:
                     # Playback recorded mouse movements
-                    print(f"Playing back recorded actions...")
+                    msg = "Playing back recorded actions..."
+                    print(msg)
+                    if log_callback:
+                        log_callback(msg)
                     # Use normal playback with timing to match original recording duration
                     self.play_recording(playback_events, speed=playback_speed, skip_moves=False, skip_delay=True, instant=False)
                 else:
                     # Simple click
                     self.click_at_position(x, y)
+                    if log_callback and successful_iterations == 0:
+                        log_callback("Clicked on image")
+
+                # Increment successful iterations counter
+                successful_iterations += 1
 
                 # If more iterations to go, wait the interval before searching again
-                if iteration < max_iterations:
+                if successful_iterations < max_iterations:
                     if interval > 0:
                         print(f"Waiting {interval} seconds before next search...")
                         time.sleep(interval)
                     else:
                         # Add minimum delay to prevent errors from rapid successive searches
                         time.sleep(0.1)
-                elif iteration >= max_iterations:
-                    print(f"Completed {iteration} iterations")
+                elif successful_iterations >= max_iterations:
+                    print(f"Completed {successful_iterations} successful iterations")
                     break
             else:
                 print(f"Image not found with confidence >= {confidence}")
-                if iteration == 1:
-                    # First attempt failed
-                    return False
-                else:
-                    # Image disappeared during repeats, stop gracefully
-                    print(f"Image no longer found after {iteration-1} successful iterations")
-                    break
 
-        return iteration > 0
+                # Check if retry mode is enabled
+                if retry_on_not_found:
+                    # Keep retrying - don't increment iteration, just wait and try again
+                    retry_delay = interval if interval > 0 else 2.0
+                    if successful_iterations == 0:
+                        msg = f"Retry mode: Image not found, waiting {retry_delay}s before retrying..."
+                        print(msg)
+                        if log_callback:
+                            log_callback(msg)
+                    else:
+                        msg = f"Image disappeared after {successful_iterations} successful clicks. Waiting {retry_delay}s to search again..."
+                        print(msg)
+                        if log_callback:
+                            log_callback(msg)
+
+                    # Sleep in small chunks to allow stopping
+                    for _ in range(int(retry_delay * 10)):
+                        if stop_flag and stop_flag():
+                            print("Stopping retry - stop flag set")
+                            return False
+                        time.sleep(0.1)
+
+                    # Don't increment iteration counter, keep trying
+                    iteration = 0
+                    continue
+                else:
+                    # Retry not enabled
+                    if iteration == 1:
+                        # First attempt failed and no retry mode
+                        return False
+                    else:
+                        # Image disappeared during repeats, stop gracefully
+                        print(f"Image no longer found after {successful_iterations} successful iterations")
+                        break
+
+        return successful_iterations > 0
 
     def repeat_clicks(self, x, y, count, interval=1.0, button='left'):
         """

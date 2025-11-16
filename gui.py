@@ -46,29 +46,28 @@ class AutoClickerGUI:
 
     def setup_gui(self):
         """Setup the GUI layout"""
-        # Title
-        title_frame = tk.Frame(self.root, bg="#2c3e50", height=60)
+        # Title - more compact
+        title_frame = tk.Frame(self.root, bg="#34495e", height=45)
         title_frame.pack(fill=tk.X, side=tk.TOP)
         title_frame.pack_propagate(False)
 
         title_label = tk.Label(
             title_frame,
-            text="🖱️ Auto Clicker with Image Matching",
-            font=("Arial", 18, "bold"),
-            bg="#2c3e50",
+            text="🖱️ Auto Clicker",
+            font=("Segoe UI", 14, "bold"),
+            bg="#34495e",
             fg="white"
         )
-        title_label.pack(pady=15)
+        title_label.pack(pady=10)
 
-        # Create notebook (tabs)
+        # Create notebook (tabs) - reduced padding
         self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
         # Create tabs
         self.create_image_click_tab()
         self.create_recorder_tab()
         self.create_playback_tab()
-        self.create_screenshot_tab()
         self.create_alarm_tab()
 
         # Status bar with save/load buttons
@@ -116,16 +115,17 @@ class AutoClickerGUI:
         )
         self.status_bar.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        # Log area
-        log_frame = tk.LabelFrame(self.root, text="Activity Log", padx=5, pady=5)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        # Log area - more compact
+        log_frame = tk.LabelFrame(self.root, text="Activity Log", padx=3, pady=3, font=("Segoe UI", 9))
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
 
         self.log_text = scrolledtext.ScrolledText(
             log_frame,
-            height=8,
+            height=6,
             state=tk.DISABLED,
-            bg="#f8f9fa",
-            font=("Consolas", 9)
+            bg="#ffffff",
+            font=("Consolas", 8),
+            wrap=tk.WORD
         )
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
@@ -151,15 +151,10 @@ class AutoClickerGUI:
     def setup_hotkeys(self):
         """Setup global keyboard shortcuts"""
         try:
-            # F9 to start recording
-            keyboard.add_hotkey('f9', self.hotkey_start_recording, suppress=False)
-            # F10 to stop recording
-            keyboard.add_hotkey('f10', self.hotkey_stop_recording, suppress=False)
             # F11 to start image click
             keyboard.add_hotkey('f11', self.hotkey_start_image_click, suppress=False)
             # F12 to stop image click
             keyboard.add_hotkey('f12', self.hotkey_stop_image_click, suppress=False)
-            self.log("Hotkeys enabled: F9=Start Recording, F10=Stop Recording")
             self.log("Hotkeys enabled: F11=Start Image Click, F12=Stop Image Click")
         except Exception as e:
             self.log(f"Warning: Could not setup hotkeys: {e}")
@@ -216,6 +211,7 @@ class AutoClickerGUI:
             "img_repeat": self.img_repeat_var.get() if hasattr(self, 'img_repeat_var') else 1,
             "img_interval": self.img_interval_var.get() if hasattr(self, 'img_interval_var') else 0.0,
             "img_unlimited": self.img_unlimited_var.get() if hasattr(self, 'img_unlimited_var') else False,
+            "img_retry_on_not_found": self.img_retry_on_not_found_var.get() if hasattr(self, 'img_retry_on_not_found_var') else False,
             "img_playback_file": self.img_playback_file_var.get() if hasattr(self, 'img_playback_file_var') else "",
             "img_playback_speed": self.img_playback_speed_var.get() if hasattr(self, 'img_playback_speed_var') else 1.0,
 
@@ -285,6 +281,8 @@ class AutoClickerGUI:
                 self.img_unlimited_var.set(settings["img_unlimited"])
                 if hasattr(self, 'toggle_img_repeat_count'):
                     self.toggle_img_repeat_count()
+            if "img_retry_on_not_found" in settings and hasattr(self, 'img_retry_on_not_found_var'):
+                self.img_retry_on_not_found_var.set(settings["img_retry_on_not_found"])
             if "img_playback_file" in settings and hasattr(self, 'img_playback_file_var'):
                 self.img_playback_file_var.set(settings["img_playback_file"])
             if "img_playback_speed" in settings and hasattr(self, 'img_playback_speed_var'):
@@ -459,12 +457,14 @@ class AutoClickerGUI:
         # Create scrollable frame
         scrollable_frame = ttk.Frame(canvas)
 
+        # Update scroll region when frame changes
         scrollable_frame.bind(
             "<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
 
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        # Create window in canvas and configure it to fill width
+        window_id = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
 
         # Pack canvas and scrollbar
@@ -488,9 +488,15 @@ class AutoClickerGUI:
         scrollable_frame.bind('<Enter>', _bind_to_mousewheel)
         scrollable_frame.bind('<Leave>', _unbind_from_mousewheel)
 
-        # Make canvas expand to fill width
+        # Make scrollable frame expand to fill canvas width
         def _configure_canvas(event):
-            canvas.itemconfig(canvas.find_withtag("all")[0], width=event.width)
+            # Get the canvas width (subtract scrollbar if visible)
+            canvas_width = event.width
+            # Set the embedded window to fill the canvas width
+            canvas.itemconfig(window_id, width=canvas_width)
+            # Also update the scroll region
+            canvas.update_idletasks()
+            canvas.configure(scrollregion=canvas.bbox("all"))
 
         canvas.bind("<Configure>", _configure_canvas)
 
@@ -504,27 +510,27 @@ class AutoClickerGUI:
         instructions = tk.Label(
             content,
             text="Record your mouse movements, clicks, and scrolls",
-            font=("Arial", 11),
-            pady=10
+            font=("Segoe UI", 9),
+            pady=5
         )
         instructions.pack()
 
         # Recording controls frame
-        controls_frame = tk.LabelFrame(content, text="Recording Controls", padx=20, pady=20)
-        controls_frame.pack(fill=tk.X, padx=20, pady=10)
+        controls_frame = tk.LabelFrame(content, text="Recording Controls", padx=8, pady=6, font=("Segoe UI", 9))
+        controls_frame.pack(fill=tk.X, padx=12, pady=5)
 
         # Status indicator
         self.record_status_label = tk.Label(
             controls_frame,
             text="⚫ Not Recording",
-            font=("Arial", 12, "bold"),
+            font=("Segoe UI", 10, "bold"),
             fg="gray"
         )
-        self.record_status_label.pack(pady=10)
+        self.record_status_label.pack(pady=4)
 
         # Buttons frame
         buttons_frame = tk.Frame(controls_frame)
-        buttons_frame.pack(pady=10)
+        buttons_frame.pack(pady=4)
 
         self.start_record_btn = tk.Button(
             buttons_frame,
@@ -532,12 +538,13 @@ class AutoClickerGUI:
             command=self.start_recording,
             bg="#27ae60",
             fg="white",
-            font=("Arial", 11, "bold"),
-            padx=20,
-            pady=10,
+            font=("Segoe UI", 9),
+            relief=tk.FLAT,
+            padx=12,
+            pady=6,
             cursor="hand2"
         )
-        self.start_record_btn.pack(side=tk.LEFT, padx=5)
+        self.start_record_btn.pack(side=tk.LEFT, padx=3)
 
         self.stop_record_btn = tk.Button(
             buttons_frame,
@@ -545,48 +552,49 @@ class AutoClickerGUI:
             command=self.stop_recording,
             bg="#e74c3c",
             fg="white",
-            font=("Arial", 11, "bold"),
-            padx=20,
-            pady=10,
+            font=("Segoe UI", 9),
+            relief=tk.FLAT,
+            padx=12,
+            pady=6,
             state=tk.DISABLED,
             cursor="hand2"
         )
-        self.stop_record_btn.pack(side=tk.LEFT, padx=5)
+        self.stop_record_btn.pack(side=tk.LEFT, padx=3)
 
         # Event counter
         self.event_count_label = tk.Label(
             controls_frame,
             text="Events recorded: 0",
-            font=("Arial", 10)
+            font=("Segoe UI", 9)
         )
-        self.event_count_label.pack(pady=10)
+        self.event_count_label.pack(pady=4)
 
         # Hotkey info
         hotkey_info = tk.Label(
             controls_frame,
             text="⌨ Hotkeys: F9 = Start | F10 = Stop",
-            font=("Arial", 9),
+            font=("Segoe UI", 8),
             fg="#3498db",
             bg="#ecf0f1",
-            padx=10,
-            pady=5
+            padx=8,
+            pady=4
         )
-        hotkey_info.pack(pady=5)
+        hotkey_info.pack(pady=3)
 
         # Save options
-        save_frame = tk.LabelFrame(content, text="Save Recording", padx=20, pady=20)
-        save_frame.pack(fill=tk.X, padx=20, pady=10)
+        save_frame = tk.LabelFrame(content, text="Save Recording", padx=8, pady=6, font=("Segoe UI", 9))
+        save_frame.pack(fill=tk.X, padx=12, pady=5)
 
-        tk.Label(save_frame, text="Filename:", font=("Arial", 10)).pack(anchor=tk.W)
+        tk.Label(save_frame, text="Filename:", font=("Segoe UI", 9)).pack(anchor=tk.W)
 
         filename_frame = tk.Frame(save_frame)
-        filename_frame.pack(fill=tk.X, pady=5)
+        filename_frame.pack(fill=tk.X, pady=3)
 
         self.record_filename_var = tk.StringVar(value="recording.json")
         filename_entry = tk.Entry(
             filename_frame,
             textvariable=self.record_filename_var,
-            font=("Arial", 10)
+            font=("Segoe UI", 9)
         )
         filename_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
 
@@ -594,6 +602,8 @@ class AutoClickerGUI:
             filename_frame,
             text="Browse...",
             command=self.browse_save_location,
+            font=("Segoe UI", 9),
+            relief=tk.FLAT,
             cursor="hand2"
         )
         browse_btn.pack(side=tk.LEFT)
@@ -604,12 +614,13 @@ class AutoClickerGUI:
             command=self.save_recording,
             bg="#3498db",
             fg="white",
-            font=("Arial", 10, "bold"),
-            padx=15,
-            pady=8,
+            font=("Segoe UI", 9),
+            relief=tk.FLAT,
+            padx=10,
+            pady=5,
             cursor="hand2"
         )
-        save_btn.pack(pady=10)
+        save_btn.pack(pady=5)
 
     def create_playback_tab(self):
         """Create the playback tab"""
@@ -617,27 +628,27 @@ class AutoClickerGUI:
 
         # Instructions
         instructions = tk.Label(
-            tab,
+            content,
             text="Load and replay recorded mouse actions",
-            font=("Arial", 11),
-            pady=10
+            font=("Segoe UI", 9),
+            pady=5
         )
         instructions.pack()
 
         # Load recording frame
-        load_frame = tk.LabelFrame(content, text="Load Recording", padx=20, pady=20)
-        load_frame.pack(fill=tk.X, padx=20, pady=10)
+        load_frame = tk.LabelFrame(content, text="Load Recording", padx=8, pady=6, font=("Segoe UI", 9))
+        load_frame.pack(fill=tk.X, padx=12, pady=5)
 
-        tk.Label(load_frame, text="Recording file:", font=("Arial", 10)).pack(anchor=tk.W)
+        tk.Label(load_frame, text="Recording file:", font=("Segoe UI", 9)).pack(anchor=tk.W)
 
         file_frame = tk.Frame(load_frame)
-        file_frame.pack(fill=tk.X, pady=5)
+        file_frame.pack(fill=tk.X, pady=3)
 
         self.playback_filename_var = tk.StringVar()
         filename_entry = tk.Entry(
             file_frame,
             textvariable=self.playback_filename_var,
-            font=("Arial", 10),
+            font=("Segoe UI", 9),
             state='readonly'
         )
         filename_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
@@ -646,6 +657,8 @@ class AutoClickerGUI:
             file_frame,
             text="Browse...",
             command=self.browse_load_file,
+            font=("Segoe UI", 9),
+            relief=tk.FLAT,
             cursor="hand2"
         )
         browse_btn.pack(side=tk.LEFT)
@@ -656,30 +669,31 @@ class AutoClickerGUI:
             command=self.load_recording,
             bg="#3498db",
             fg="white",
-            font=("Arial", 10, "bold"),
-            padx=15,
-            pady=8,
+            font=("Segoe UI", 9),
+            relief=tk.FLAT,
+            padx=10,
+            pady=5,
             cursor="hand2"
         )
-        load_btn.pack(pady=10)
+        load_btn.pack(pady=5)
 
         self.loaded_info_label = tk.Label(
             load_frame,
             text="No recording loaded",
-            font=("Arial", 9),
+            font=("Segoe UI", 8),
             fg="gray"
         )
         self.loaded_info_label.pack()
 
         # Playback controls
-        playback_frame = tk.LabelFrame(content, text="Playback Controls", padx=20, pady=20)
-        playback_frame.pack(fill=tk.X, padx=20, pady=10)
+        playback_frame = tk.LabelFrame(content, text="Playback Controls", padx=8, pady=6, font=("Segoe UI", 9))
+        playback_frame.pack(fill=tk.X, padx=12, pady=5)
 
         # Speed control
         speed_frame = tk.Frame(playback_frame)
-        speed_frame.pack(fill=tk.X, pady=10)
+        speed_frame.pack(fill=tk.X, pady=5)
 
-        tk.Label(speed_frame, text="Playback Speed:", font=("Arial", 10)).pack(side=tk.LEFT)
+        tk.Label(speed_frame, text="Playback Speed:", font=("Segoe UI", 9)).pack(side=tk.LEFT)
 
         self.speed_var = tk.DoubleVar(value=1.0)
         speed_scale = tk.Scale(
@@ -689,11 +703,11 @@ class AutoClickerGUI:
             resolution=0.1,
             orient=tk.HORIZONTAL,
             variable=self.speed_var,
-            length=200
+            length=180
         )
-        speed_scale.pack(side=tk.LEFT, padx=10)
+        speed_scale.pack(side=tk.LEFT, padx=8)
 
-        self.speed_label = tk.Label(speed_frame, text="1.0x", font=("Arial", 10, "bold"))
+        self.speed_label = tk.Label(speed_frame, text="1.0x", font=("Segoe UI", 9, "bold"))
         self.speed_label.pack(side=tk.LEFT)
 
         self.speed_var.trace('w', lambda *args: self.speed_label.config(text=f"{self.speed_var.get():.1f}x"))
@@ -705,18 +719,19 @@ class AutoClickerGUI:
             command=self.play_recording,
             bg="#27ae60",
             fg="white",
-            font=("Arial", 12, "bold"),
-            padx=30,
-            pady=15,
+            font=("Segoe UI", 10, "bold"),
+            relief=tk.FLAT,
+            padx=20,
+            pady=10,
             cursor="hand2"
         )
-        play_btn.pack(pady=20)
+        play_btn.pack(pady=10)
 
         # Warning
         warning_label = tk.Label(
             playback_frame,
             text="⚠ Move mouse to top-left corner to abort playback",
-            font=("Arial", 9),
+            font=("Segoe UI", 8),
             fg="#e74c3c"
         )
         warning_label.pack()
@@ -725,61 +740,63 @@ class AutoClickerGUI:
         """Create the image template matching tab"""
         tab, content = self.create_scrollable_tab("🖼 Image Click")
 
-        # Instructions
+        # Instructions - inside scrollable content
         instructions = tk.Label(
-            tab,
+            content,
             text="Find and click on screen elements using template images",
-            font=("Arial", 11),
-            pady=10
+            font=("Segoe UI", 10),
+            pady=8
         )
         instructions.pack()
 
-        # Action buttons (at top)
+        # Action buttons (at top) - more compact
         action_frame = tk.Frame(content)
-        action_frame.pack(pady=20)
+        action_frame.pack(pady=12)
 
         self.start_img_click_btn = tk.Button(
             action_frame,
-            text="▶ Start Image Click",
+            text="▶ Start",
             command=self.start_image_click,
             bg="#27ae60",
             fg="white",
-            font=("Arial", 11, "bold"),
-            padx=20,
-            pady=10,
-            cursor="hand2"
+            font=("Segoe UI", 10, "bold"),
+            padx=15,
+            pady=6,
+            cursor="hand2",
+            relief=tk.FLAT
         )
-        self.start_img_click_btn.pack(side=tk.LEFT, padx=5)
+        self.start_img_click_btn.pack(side=tk.LEFT, padx=3)
 
         self.stop_img_click_btn = tk.Button(
             action_frame,
-            text="⏹ Stop Image Click",
+            text="⏹ Stop",
             command=self.stop_image_click,
             bg="#e74c3c",
             fg="white",
-            font=("Arial", 11, "bold"),
-            padx=20,
-            pady=10,
+            font=("Segoe UI", 10, "bold"),
+            padx=15,
+            pady=6,
             state=tk.DISABLED,
-            cursor="hand2"
+            cursor="hand2",
+            relief=tk.FLAT
         )
-        self.stop_img_click_btn.pack(side=tk.LEFT, padx=5)
+        self.stop_img_click_btn.pack(side=tk.LEFT, padx=3)
 
-        # Hotkey info
+        # Hotkey info - more compact
         hotkey_info = tk.Label(
             content,
-            text="⌨ Hotkeys: F11 = Start | F12 = Stop",
-            font=("Arial", 9),
-            fg="#3498db",
+            text="⌨ F11 = Start | F12 = Stop",
+            font=("Segoe UI", 8),
+            fg="#7f8c8d",
             bg="#ecf0f1",
-            padx=10,
-            pady=5
+            padx=8,
+            pady=3
         )
-        hotkey_info.pack(pady=5)
+        hotkey_info.pack(pady=3)
 
-        # Image selection
-        image_frame = tk.LabelFrame(content, text="Template Image", padx=20, pady=20)
-        image_frame.pack(fill=tk.X, padx=20, pady=10)
+        # Image selection - more compact
+        image_frame = tk.LabelFrame(content, text="Template Image", padx=12, pady=12, font=("Segoe UI", 9))
+        image_frame.pack(fill=tk.X, padx=15, pady=8)
 
         tk.Label(
             image_frame,
@@ -807,9 +824,9 @@ class AutoClickerGUI:
         )
         browse_btn.pack(side=tk.LEFT)
 
-        # Confidence threshold
-        confidence_frame = tk.LabelFrame(content, text="Matching Settings", padx=20, pady=20)
-        confidence_frame.pack(fill=tk.X, padx=20, pady=10)
+        # Confidence threshold - more compact
+        confidence_frame = tk.LabelFrame(content, text="Matching Settings", padx=12, pady=12, font=("Segoe UI", 9))
+        confidence_frame.pack(fill=tk.X, padx=15, pady=8)
 
         conf_slider_frame = tk.Frame(confidence_frame)
         conf_slider_frame.pack(fill=tk.X, pady=10)
@@ -852,8 +869,8 @@ class AutoClickerGUI:
         ).pack(pady=5)
 
         # Monitor selection
-        img_monitor_frame = tk.LabelFrame(content, text="Monitor Selection", padx=20, pady=20)
-        img_monitor_frame.pack(fill=tk.X, padx=20, pady=10)
+        img_monitor_frame = tk.LabelFrame(content, text="Monitor Selection", padx=12, pady=12, font=("Segoe UI", 9))
+        img_monitor_frame.pack(fill=tk.X, padx=15, pady=8)
 
         tk.Label(
             img_monitor_frame,
@@ -906,8 +923,8 @@ class AutoClickerGUI:
             preview_btn.pack(side=tk.LEFT, padx=10)
 
         # Action Mode Selection
-        action_mode_frame = tk.LabelFrame(content, text="Action When Found", padx=20, pady=20)
-        action_mode_frame.pack(fill=tk.X, padx=20, pady=10)
+        action_mode_frame = tk.LabelFrame(content, text="Action When Found", padx=12, pady=12, font=("Segoe UI", 9))
+        action_mode_frame.pack(fill=tk.X, padx=15, pady=8)
 
         self.img_action_mode_var = tk.StringVar(value="click")
 
@@ -948,8 +965,8 @@ class AutoClickerGUI:
         self.img_action_controls_frame.pack(fill=tk.X, pady=10)
 
         # Repeat/Interval settings (for both modes)
-        repeat_frame = tk.LabelFrame(content, text="Repeat Settings", padx=20, pady=20)
-        repeat_frame.pack(fill=tk.X, padx=20, pady=10)
+        repeat_frame = tk.LabelFrame(content, text="Repeat Settings", padx=12, pady=12, font=("Segoe UI", 9))
+        repeat_frame.pack(fill=tk.X, padx=15, pady=8)
 
         tk.Label(
             repeat_frame,
@@ -968,6 +985,17 @@ class AutoClickerGUI:
             command=self.toggle_img_repeat_count
         )
         unlimited_check.pack(anchor=tk.W, pady=5)
+
+        # Keep retrying checkbox
+        self.img_retry_on_not_found_var = tk.BooleanVar(value=False)
+        retry_check = tk.Checkbutton(
+            repeat_frame,
+            text="🔄 Keep Retrying if Image Not Found (doesn't stop, waits and retries)",
+            variable=self.img_retry_on_not_found_var,
+            font=("Arial", 9, "bold"),
+            fg="#3498db"
+        )
+        retry_check.pack(anchor=tk.W, pady=5)
 
         repeat_controls = tk.Frame(repeat_frame)
         repeat_controls.pack(fill=tk.X, pady=5)
@@ -1015,7 +1043,7 @@ class AutoClickerGUI:
 
         # Instructions
         instructions = tk.Label(
-            tab,
+            content,
             text="Capture screenshots of your screen",
             font=("Arial", 11),
             pady=10
@@ -1023,8 +1051,8 @@ class AutoClickerGUI:
         instructions.pack()
 
         # Screenshot options
-        options_frame = tk.LabelFrame(content, text="Screenshot Options", padx=20, pady=20)
-        options_frame.pack(fill=tk.X, padx=20, pady=10)
+        options_frame = tk.LabelFrame(content, text="Screenshot Options", padx=12, pady=12, font=("Segoe UI", 9))
+        options_frame.pack(fill=tk.X, padx=15, pady=8)
 
         # Full screen or region
         self.screenshot_mode_var = tk.StringVar(value="full")
@@ -1062,8 +1090,8 @@ class AutoClickerGUI:
             tk.Entry(frame, textvariable=var, width=8, font=("Arial", 9)).pack(side=tk.LEFT)
 
         # Save location
-        save_frame = tk.LabelFrame(content, text="Save Location", padx=20, pady=20)
-        save_frame.pack(fill=tk.X, padx=20, pady=10)
+        save_frame = tk.LabelFrame(content, text="Save Location", padx=12, pady=12, font=("Segoe UI", 9))
+        save_frame.pack(fill=tk.X, padx=15, pady=8)
 
         file_frame = tk.Frame(save_frame)
         file_frame.pack(fill=tk.X, pady=5)
@@ -1321,6 +1349,7 @@ class AutoClickerGUI:
         unlimited = self.img_unlimited_var.get()
         repeat_count = self.img_repeat_var.get()
         interval = self.img_interval_var.get()
+        retry_on_not_found = self.img_retry_on_not_found_var.get()
 
         # Get action mode
         action_mode = self.img_action_mode_var.get()
@@ -1355,6 +1384,8 @@ class AutoClickerGUI:
                     self.log(f"Unlimited mode: Will repeat forever with {interval}s interval")
                 elif repeat_count > 1:
                     self.log(f"Will repeat {repeat_count} times with {interval}s interval")
+                if retry_on_not_found:
+                    self.log(f"Retry mode: Will keep searching if image not found")
 
                 self.update_status("Searching for template image...")
 
@@ -1367,7 +1398,9 @@ class AutoClickerGUI:
                     playback_events=playback_events,
                     playback_speed=playback_speed,
                     unlimited=unlimited,
-                    stop_flag=lambda: not self.img_click_running
+                    retry_on_not_found=retry_on_not_found,
+                    stop_flag=lambda: not self.img_click_running,
+                    log_callback=self.log
                 )
 
                 # Check if stopped by user before showing results
@@ -1459,28 +1492,28 @@ class AutoClickerGUI:
 
         # Instructions
         instructions = tk.Label(
-            tab,
+            content,
             text="Create multiple alarms to play MP3 files or trigger recordings",
-            font=("Arial", 11),
-            pady=10
+            font=("Segoe UI", 9),
+            pady=5
         )
         instructions.pack()
 
         # Monitoring status (moved to top)
-        status_frame = tk.LabelFrame(content, text="Monitor Status", padx=20, pady=20)
-        status_frame.pack(fill=tk.X, padx=20, pady=10)
+        status_frame = tk.LabelFrame(content, text="Monitor Status", padx=8, pady=6, font=("Segoe UI", 9))
+        status_frame.pack(fill=tk.X, padx=12, pady=5)
 
         self.alarm_monitor_status_label = tk.Label(
             status_frame,
             text="⚫ Monitoring: OFF",
-            font=("Arial", 12, "bold"),
+            font=("Segoe UI", 10, "bold"),
             fg="gray"
         )
-        self.alarm_monitor_status_label.pack(pady=10)
+        self.alarm_monitor_status_label.pack(pady=4)
 
         # Monitor control buttons
         monitor_btn_frame = tk.Frame(status_frame)
-        monitor_btn_frame.pack(pady=10)
+        monitor_btn_frame.pack(pady=4)
 
         self.start_monitor_btn = tk.Button(
             monitor_btn_frame,
@@ -1488,12 +1521,13 @@ class AutoClickerGUI:
             command=self.start_alarm_monitor,
             bg="#27ae60",
             fg="white",
-            font=("Arial", 11, "bold"),
-            padx=20,
-            pady=10,
+            font=("Segoe UI", 9),
+            relief=tk.FLAT,
+            padx=12,
+            pady=6,
             cursor="hand2"
         )
-        self.start_monitor_btn.pack(side=tk.LEFT, padx=5)
+        self.start_monitor_btn.pack(side=tk.LEFT, padx=3)
 
         self.stop_monitor_btn = tk.Button(
             monitor_btn_frame,
@@ -1501,21 +1535,22 @@ class AutoClickerGUI:
             command=self.stop_alarm_monitor,
             bg="#e74c3c",
             fg="white",
-            font=("Arial", 11, "bold"),
-            padx=20,
-            pady=10,
+            font=("Segoe UI", 9),
+            relief=tk.FLAT,
+            padx=12,
+            pady=6,
             state=tk.DISABLED,
             cursor="hand2"
         )
-        self.stop_monitor_btn.pack(side=tk.LEFT, padx=5)
+        self.stop_monitor_btn.pack(side=tk.LEFT, padx=3)
 
         # Alarm list section
-        list_frame = tk.LabelFrame(content, text="Alarms", padx=20, pady=20)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        list_frame = tk.LabelFrame(content, text="Alarms", padx=8, pady=6, font=("Segoe UI", 9))
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=5)
 
         # Alarm listbox with scrollbar
         listbox_frame = tk.Frame(list_frame)
-        listbox_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        listbox_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
 
         alarm_scrollbar = tk.Scrollbar(listbox_frame)
         alarm_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -1523,8 +1558,8 @@ class AutoClickerGUI:
         self.alarm_listbox = tk.Listbox(
             listbox_frame,
             yscrollcommand=alarm_scrollbar.set,
-            font=("Arial", 10),
-            height=8,
+            font=("Segoe UI", 9),
+            height=6,
             selectmode=tk.SINGLE
         )
         self.alarm_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -1532,7 +1567,7 @@ class AutoClickerGUI:
 
         # List action buttons
         list_btn_frame = tk.Frame(list_frame)
-        list_btn_frame.pack(fill=tk.X, pady=5)
+        list_btn_frame.pack(fill=tk.X, pady=3)
 
         tk.Button(
             list_btn_frame,
@@ -1540,11 +1575,12 @@ class AutoClickerGUI:
             command=self.show_add_alarm_dialog,
             bg="#27ae60",
             fg="white",
-            font=("Arial", 10, "bold"),
-            padx=15,
-            pady=8,
+            font=("Segoe UI", 9),
+            relief=tk.FLAT,
+            padx=10,
+            pady=5,
             cursor="hand2"
-        ).pack(side=tk.LEFT, padx=5)
+        ).pack(side=tk.LEFT, padx=3)
 
         tk.Button(
             list_btn_frame,
@@ -1552,11 +1588,12 @@ class AutoClickerGUI:
             command=self.edit_selected_alarm,
             bg="#3498db",
             fg="white",
-            font=("Arial", 10, "bold"),
-            padx=15,
-            pady=8,
+            font=("Segoe UI", 9),
+            relief=tk.FLAT,
+            padx=10,
+            pady=5,
             cursor="hand2"
-        ).pack(side=tk.LEFT, padx=5)
+        ).pack(side=tk.LEFT, padx=3)
 
         tk.Button(
             list_btn_frame,
@@ -1564,11 +1601,12 @@ class AutoClickerGUI:
             command=self.delete_selected_alarm,
             bg="#e74c3c",
             fg="white",
-            font=("Arial", 10, "bold"),
-            padx=15,
-            pady=8,
+            font=("Segoe UI", 9),
+            relief=tk.FLAT,
+            padx=10,
+            pady=5,
             cursor="hand2"
-        ).pack(side=tk.LEFT, padx=5)
+        ).pack(side=tk.LEFT, padx=3)
 
         tk.Button(
             list_btn_frame,
@@ -1576,54 +1614,12 @@ class AutoClickerGUI:
             command=self.toggle_selected_alarm,
             bg="#f39c12",
             fg="white",
-            font=("Arial", 10, "bold"),
-            padx=15,
-            pady=8,
+            font=("Segoe UI", 9),
+            relief=tk.FLAT,
+            padx=10,
+            pady=5,
             cursor="hand2"
-        ).pack(side=tk.LEFT, padx=5)
-
-        # Monitoring status
-        status_frame = tk.LabelFrame(content, text="Monitor Status", padx=20, pady=20)
-        status_frame.pack(fill=tk.X, padx=20, pady=10)
-
-        self.alarm_monitor_status_label = tk.Label(
-            status_frame,
-            text="⚫ Monitoring: OFF",
-            font=("Arial", 12, "bold"),
-            fg="gray"
-        )
-        self.alarm_monitor_status_label.pack(pady=10)
-
-        # Monitor control buttons
-        monitor_btn_frame = tk.Frame(status_frame)
-        monitor_btn_frame.pack(pady=10)
-
-        self.start_monitor_btn = tk.Button(
-            monitor_btn_frame,
-            text="▶ Start Monitoring",
-            command=self.start_alarm_monitor,
-            bg="#27ae60",
-            fg="white",
-            font=("Arial", 11, "bold"),
-            padx=20,
-            pady=10,
-            cursor="hand2"
-        )
-        self.start_monitor_btn.pack(side=tk.LEFT, padx=5)
-
-        self.stop_monitor_btn = tk.Button(
-            monitor_btn_frame,
-            text="⏹ Stop Monitoring",
-            command=self.stop_alarm_monitor,
-            bg="#e74c3c",
-            fg="white",
-            font=("Arial", 11, "bold"),
-            padx=20,
-            pady=10,
-            state=tk.DISABLED,
-            cursor="hand2"
-        )
-        self.stop_monitor_btn.pack(side=tk.LEFT, padx=5)
+        ).pack(side=tk.LEFT, padx=3)
 
     def refresh_alarm_list(self):
         """Refresh the alarm list display"""
@@ -1731,8 +1727,20 @@ class AutoClickerGUI:
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
 
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        window_id = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Make scrollable frame expand to fill canvas width
+        def _configure_canvas(event):
+            # Get the canvas width (subtract scrollbar if visible)
+            canvas_width = event.width
+            # Set the embedded window to fill the canvas width
+            canvas.itemconfig(window_id, width=canvas_width)
+            # Also update the scroll region
+            canvas.update_idletasks()
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        canvas.bind("<Configure>", _configure_canvas)
 
         # Enable mouse wheel scrolling
         def _on_mousewheel(event):
@@ -1925,66 +1933,129 @@ class AutoClickerGUI:
             cursor="hand2"
         ).pack(side=tk.LEFT)
 
-        # Image file selection
-        image_frame = tk.LabelFrame(scrollable_frame, text="Image File (for Click on Image)", padx=15, pady=8)
+        # Image files selection (multiple images supported)
+        image_frame = tk.LabelFrame(scrollable_frame, text="Image Files (for Click on Image)", padx=15, pady=8)
         image_frame.pack(fill=tk.X, padx=15, pady=3)
 
-        image_file_var = tk.StringVar(value=alarm.get('image_file', '') if alarm else '')
+        # Initialize image_files list from alarm data
+        image_files_list = []
+        if alarm:
+            # Check if old format (single image)
+            if 'image_file' in alarm and alarm['image_file']:
+                # Convert old format to new format
+                image_files_list = [{
+                    'file': alarm['image_file'],
+                    'monitor': alarm.get('image_monitor', 0)
+                }]
+            # Check if new format (multiple images)
+            elif 'image_files' in alarm:
+                image_files_list = alarm['image_files']
 
-        image_entry_frame = tk.Frame(image_frame)
-        image_entry_frame.pack(fill=tk.X, pady=3)
+        # Container for image entries
+        images_container = tk.Frame(image_frame)
+        images_container.pack(fill=tk.X, pady=3)
 
-        tk.Entry(
-            image_entry_frame,
-            textvariable=image_file_var,
-            font=("Arial", 8),
-            state='readonly'
-        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
+        image_entries = []  # Store all image entry widgets
 
-        def browse_image():
-            filename = filedialog.askopenfilename(
-                filetypes=[
-                    ("Image files", "*.png *.jpg *.jpeg *.bmp"),
-                    ("PNG files", "*.png"),
-                    ("JPEG files", "*.jpg *.jpeg"),
-                    ("All files", "*.*")
-                ]
+        def add_image_entry(image_data=None):
+            entry_frame = tk.Frame(images_container, bd=1, relief=tk.GROOVE, padx=5, pady=5)
+            entry_frame.pack(fill=tk.X, pady=2)
+
+            file_var = tk.StringVar(value=image_data['file'] if image_data else '')
+            monitor_var = tk.IntVar(value=image_data['monitor'] if image_data else 0)
+
+            # File selection
+            file_frame = tk.Frame(entry_frame)
+            file_frame.pack(fill=tk.X)
+
+            tk.Entry(
+                file_frame,
+                textvariable=file_var,
+                font=("Arial", 8),
+                state='readonly'
+            ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
+
+            def browse_image():
+                filename = filedialog.askopenfilename(
+                    filetypes=[
+                        ("Image files", "*.png *.jpg *.jpeg *.bmp"),
+                        ("PNG files", "*.png"),
+                        ("JPEG files", "*.jpg *.jpeg"),
+                        ("All files", "*.*")
+                    ]
+                )
+                if filename:
+                    file_var.set(filename)
+
+            tk.Button(
+                file_frame,
+                text="Browse",
+                command=browse_image,
+                font=("Arial", 7),
+                cursor="hand2",
+                width=8
+            ).pack(side=tk.LEFT, padx=2)
+
+            # Remove button
+            def remove_entry():
+                entry_frame.destroy()
+                image_entries.remove((file_var, monitor_var, entry_frame))
+
+            tk.Button(
+                file_frame,
+                text="✕",
+                command=remove_entry,
+                font=("Arial", 8, "bold"),
+                fg="red",
+                cursor="hand2",
+                width=2
+            ).pack(side=tk.LEFT)
+
+            # Monitor selection
+            monitor_frame = tk.Frame(entry_frame)
+            monitor_frame.pack(fill=tk.X, pady=(3, 0))
+
+            tk.Label(monitor_frame, text="Monitor:", font=("Arial", 7)).pack(side=tk.LEFT, padx=(0, 5))
+
+            monitor_options = ["All Monitors"] + [f"Monitor {i+1}" for i in range(len(self.analyzer.get_monitors()))]
+            monitor_combo = ttk.Combobox(
+                monitor_frame,
+                values=monitor_options,
+                state='readonly',
+                font=("Arial", 7),
+                width=13
             )
-            if filename:
-                image_file_var.set(filename)
+            monitor_combo.current(monitor_var.get())
+            monitor_combo.pack(side=tk.LEFT)
+
+            def on_monitor_change(event):
+                monitor_var.set(monitor_combo.current())
+
+            monitor_combo.bind('<<ComboboxSelected>>', on_monitor_change)
+
+            image_entries.append((file_var, monitor_var, entry_frame))
+
+        # Add existing images
+        if image_files_list:
+            for img_data in image_files_list:
+                add_image_entry(img_data)
+        else:
+            # Add one empty entry by default
+            add_image_entry()
+
+        # Add Image button
+        add_btn_frame = tk.Frame(image_frame)
+        add_btn_frame.pack(fill=tk.X, pady=(5, 0))
 
         tk.Button(
-            image_entry_frame,
-            text="Browse...",
-            command=browse_image,
+            add_btn_frame,
+            text="+ Add Another Image",
+            command=lambda: add_image_entry(),
             font=("Arial", 8),
-            cursor="hand2"
-        ).pack(side=tk.LEFT)
-
-        # Monitor selection for image search
-        monitor_select_frame = tk.Frame(image_frame)
-        monitor_select_frame.pack(fill=tk.X, pady=3)
-
-        tk.Label(monitor_select_frame, text="Monitor:", font=("Arial", 8)).pack(side=tk.LEFT, padx=(0, 5))
-
-        image_monitor_var = tk.IntVar(value=alarm.get('image_monitor', 0) if alarm else 0)
-
-        monitor_options = ["All Monitors"] + [f"Monitor {i+1}" for i in range(len(self.analyzer.get_monitors()))]
-        image_monitor_combo = ttk.Combobox(
-            monitor_select_frame,
-            values=monitor_options,
-            state='readonly',
-            font=("Arial", 8),
-            width=15
-        )
-        image_monitor_combo.current(image_monitor_var.get())
-        image_monitor_combo.pack(side=tk.LEFT)
-
-        def on_monitor_change(event):
-            selected_index = image_monitor_combo.current()
-            image_monitor_var.set(selected_index)
-
-        image_monitor_combo.bind('<<ComboboxSelected>>', on_monitor_change)
+            cursor="hand2",
+            bg="#4CAF50",
+            fg="white"
+        ).pack()
 
         # Playback speed
         speed_frame = tk.LabelFrame(scrollable_frame, text="Recording Playback Speed", padx=15, pady=8)
@@ -2049,6 +2120,16 @@ class AutoClickerGUI:
                 if old_hour != new_hour or old_minute != new_minute or old_am_pm != new_am_pm:
                     time_changed = True
 
+            # Collect all image files
+            image_files = []
+            for file_var, monitor_var, _ in image_entries:
+                file_path = file_var.get()
+                if file_path:  # Only add if file is selected
+                    image_files.append({
+                        'file': file_path,
+                        'monitor': monitor_var.get()
+                    })
+
             alarm_data = {
                 'hour': hour_var.get(),
                 'minute': minute_var.get(),
@@ -2061,8 +2142,7 @@ class AutoClickerGUI:
                 'click_image': click_image_var.get(),
                 'recording_file': recording_file_var.get(),
                 'mp3_file': mp3_file_var.get(),
-                'image_file': image_file_var.get(),
-                'image_monitor': image_monitor_var.get(),
+                'image_files': image_files,  # Multiple images
                 'speed': speed_var.get(),
                 'enabled': alarm['enabled'] if alarm else True,
                 # Clear triggered_today if time was changed, otherwise keep it
@@ -2196,20 +2276,42 @@ class AutoClickerGUI:
                         # Execute Click on Image first (if enabled)
                         image_found = False
                         if alarm.get('click_image', False):
-                            image_file = alarm.get('image_file', '')
-                            if image_file:
-                                # Get monitor selection (0 = all, 1+ = specific monitor)
-                                monitor_index = alarm.get('image_monitor', 0)
-                                monitor = None if monitor_index == 0 else monitor_index
+                            # Support both old and new format
+                            image_files = []
 
-                                # Search for image with 5 attempts (not unlimited)
-                                self.log(f"Alarm searching for image (max 5 attempts)...")
-                                image_found = self.find_and_click_image(image_file, 0.8, monitor, max_retries=5, retry_interval=2.0)
+                            # Check for new format (multiple images)
+                            if 'image_files' in alarm and alarm['image_files']:
+                                image_files = alarm['image_files']
+                            # Fall back to old format (single image)
+                            elif 'image_file' in alarm and alarm['image_file']:
+                                image_files = [{
+                                    'file': alarm['image_file'],
+                                    'monitor': alarm.get('image_monitor', 0)
+                                }]
+
+                            if image_files:
+                                self.log(f"Alarm will search for {len(image_files)} image(s)...")
+
+                                # Try each image in order
+                                for idx, img_data in enumerate(image_files, 1):
+                                    image_file = img_data['file']
+                                    monitor_index = img_data['monitor']
+                                    monitor = None if monitor_index == 0 else monitor_index
+
+                                    # Search for image with 5 attempts (not unlimited)
+                                    self.log(f"Searching for image {idx}/{len(image_files)}: {os.path.basename(image_file)} (max 5 attempts)...")
+                                    found = self.find_and_click_image(image_file, 0.8, monitor, max_retries=5, retry_interval=2.0)
+
+                                    if found:
+                                        self.log(f"Image {idx} found and clicked!")
+                                        image_found = True
+                                    else:
+                                        self.log(f"Image {idx} not found after 5 attempts")
 
                                 if not image_found:
-                                    self.log("Image not found after 5 attempts, alarm actions completed")
+                                    self.log("None of the images were found, alarm actions completed")
                             else:
-                                self.log("Click on Image action selected but no image file specified")
+                                self.log("Click on Image action selected but no image files specified")
 
                         # Only start autoclicker if no click_image OR if image was found
                         if alarm.get('start_autoclicker', False):
@@ -2326,7 +2428,7 @@ class AutoClickerGUI:
                     pady=10,
                     font=("Arial", 11, "bold")
                 )
-                monitor_frame.pack(fill=tk.X, padx=20, pady=10)
+                monitor_frame.pack(fill=tk.X, padx=15, pady=8)
 
                 # Convert PIL image to PhotoImage
                 photo = ImageTk.PhotoImage(thumbnail)
