@@ -2268,11 +2268,6 @@ class AutoClickerGUI:
                                 alarm.get('speed', 1.0)
                             )
 
-                        if alarm.get('pause_autoclicker', False):
-                            if self.img_click_running:
-                                self.stop_image_click()
-                                self.log("Image Click stopped by alarm")
-
                         # Execute Click on Image first (if enabled)
                         image_found = False
                         if alarm.get('click_image', False):
@@ -2305,13 +2300,27 @@ class AutoClickerGUI:
                                     if found:
                                         self.log(f"Image {idx} found and clicked!")
                                         image_found = True
+                                        # Add delay after clicking before searching for next image
+                                        if idx < len(image_files):  # Not the last image
+                                            self.log(f"Waiting 1 second before searching for next image...")
+                                            time_module.sleep(1.0)
                                     else:
                                         self.log(f"Image {idx} not found after 5 attempts")
 
                                 if not image_found:
                                     self.log("None of the images were found, alarm actions completed")
+                                else:
+                                    # Add delay after all images are clicked before pausing
+                                    self.log(f"All images clicked, waiting 1 second before next action...")
+                                    time_module.sleep(1.0)
                             else:
                                 self.log("Click on Image action selected but no image files specified")
+
+                        # Pause autoclicker AFTER clicking images (if enabled)
+                        if alarm.get('pause_autoclicker', False):
+                            if self.img_click_running:
+                                self.stop_image_click()
+                                self.log("Image Click stopped by alarm")
 
                         # Only start autoclicker if no click_image OR if image was found
                         if alarm.get('start_autoclicker', False):
