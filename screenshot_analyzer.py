@@ -2,34 +2,50 @@
 Screenshot capture and image template matching
 Uses OpenCV for template matching to find and click on screen elements
 """
+from typing import List, Dict, Optional, Tuple, Any
+
 import pyautogui
 import cv2
 import numpy as np
 from PIL import Image
 from mss import mss
 
+from logging_config import get_logger
+
+# Module logger
+logger = get_logger("screenshot_analyzer")
+
 
 class ScreenshotAnalyzer:
-    def __init__(self, api_key=None):
+    """Handles screenshot capture and OpenCV template matching."""
+    
+    def __init__(self, api_key: Optional[str] = None) -> None:
         """
-        Initialize the screenshot analyzer
+        Initialize the screenshot analyzer.
+        
+        Args:
+            api_key: Optional API key (reserved for future AI features)
         """
         pass
 
-    def get_monitors(self):
+    def get_monitors(self) -> List[Dict[str, int]]:
         """
-        Get list of all monitors
+        Get list of all monitors.
 
         Returns:
             List of monitor dictionaries with 'left', 'top', 'width', 'height'
         """
         with mss() as sct:
-            monitors = sct.monitors[1:]  # Skip the first one (combined screen)
+            monitors: List[Dict[str, Any]] = sct.monitors[1:]  # Skip the first one (combined screen)
             return monitors
 
-    def capture_screenshot(self, region=None, monitor=None):
+    def capture_screenshot(
+        self,
+        region: Optional[Tuple[int, int, int, int]] = None,
+        monitor: Optional[int] = None
+    ) -> Image.Image:
         """
-        Capture a screenshot
+        Capture a screenshot.
 
         Args:
             region: Tuple (x, y, width, height) for specific region, or None for full screen
@@ -47,7 +63,7 @@ class ScreenshotAnalyzer:
                     screenshot = sct.grab(mon)
                     return Image.frombytes('RGB', screenshot.size, screenshot.rgb)
                 else:
-                    print(f"Warning: Monitor {monitor} not found, using default")
+                    logger.warning(f"Monitor {monitor} not found, using default")
 
         if region:
             screenshot = pyautogui.screenshot(region=region)
@@ -55,14 +71,25 @@ class ScreenshotAnalyzer:
             screenshot = pyautogui.screenshot()
         return screenshot
 
-    def save_screenshot(self, screenshot, filename):
-        """Save screenshot to file"""
-        screenshot.save(filename)
-        print(f"Screenshot saved to {filename}")
-
-    def find_image_on_screen(self, template_image_path, confidence=0.8, monitor=None):
+    def save_screenshot(self, screenshot: Image.Image, filename: str) -> None:
         """
-        Find a template image on the current screen using OpenCV
+        Save screenshot to file.
+        
+        Args:
+            screenshot: PIL Image to save
+            filename: Path to save the screenshot
+        """
+        screenshot.save(filename)
+        logger.info(f"Screenshot saved to {filename}")
+
+    def find_image_on_screen(
+        self,
+        template_image_path: str,
+        confidence: float = 0.8,
+        monitor: Optional[int] = None
+    ) -> Optional[Tuple[int, int, float]]:
+        """
+        Find a template image on the current screen using OpenCV.
 
         Args:
             template_image_path: Path to the template image to search for
@@ -79,8 +106,8 @@ class ScreenshotAnalyzer:
 
         if monitor is None:
             # Search all monitors individually and return the best match
-            best_match = None
-            best_confidence = 0
+            best_match: Optional[Tuple[int, int, float]] = None
+            best_confidence: float = 0
 
             with mss() as sct:
                 monitors = sct.monitors[1:]  # Skip combined screen
@@ -125,9 +152,9 @@ class ScreenshotAnalyzer:
             else:
                 return None
 
-    def get_monitor_thumbnails(self, max_width=200):
+    def get_monitor_thumbnails(self, max_width: int = 200) -> List[Image.Image]:
         """
-        Capture thumbnails of all monitors
+        Capture thumbnails of all monitors.
 
         Args:
             max_width: Maximum width for thumbnail (height scaled proportionally)
@@ -135,7 +162,7 @@ class ScreenshotAnalyzer:
         Returns:
             List of PIL Image thumbnails
         """
-        thumbnails = []
+        thumbnails: List[Image.Image] = []
         monitors = self.get_monitors()
 
         for i, mon in enumerate(monitors):

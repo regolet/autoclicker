@@ -202,6 +202,9 @@ class AutoClickerGUI:
             # Playback settings
             "last_playback_file": self.playback_filename_var.get() if hasattr(self, 'playback_filename_var') else "",
             "playback_speed": self.speed_var.get() if hasattr(self, 'speed_var') else 1.0,
+            "playback_unlimited": self.playback_unlimited_var.get() if hasattr(self, 'playback_unlimited_var') else False,
+            "playback_repeat": self.playback_repeat_var.get() if hasattr(self, 'playback_repeat_var') else 1,
+            "playback_interval": self.playback_interval_combo.current() if hasattr(self, 'playback_interval_combo') else 0,
 
             # Image Click settings
             "template_image": self.template_image_var.get() if hasattr(self, 'template_image_var') else "",
@@ -263,6 +266,14 @@ class AutoClickerGUI:
                 self.playback_filename_var.set(settings["last_playback_file"])
             if "playback_speed" in settings and hasattr(self, 'speed_var'):
                 self.speed_var.set(settings["playback_speed"])
+            if "playback_unlimited" in settings and hasattr(self, 'playback_unlimited_var'):
+                self.playback_unlimited_var.set(settings["playback_unlimited"])
+                if hasattr(self, 'toggle_playback_repeat'):
+                    self.toggle_playback_repeat()
+            if "playback_repeat" in settings and hasattr(self, 'playback_repeat_var'):
+                self.playback_repeat_var.set(settings["playback_repeat"])
+            if "playback_interval" in settings and hasattr(self, 'playback_interval_combo'):
+                self.playback_interval_combo.current(settings["playback_interval"])
 
             # Apply Image Click settings
             if "template_image" in settings and hasattr(self, 'template_image_var'):
@@ -712,9 +723,86 @@ class AutoClickerGUI:
 
         self.speed_var.trace('w', lambda *args: self.speed_label.config(text=f"{self.speed_var.get():.1f}x"))
 
-        # Play button
-        play_btn = tk.Button(
-            playback_frame,
+        # Repeat Settings
+        repeat_frame = tk.LabelFrame(content, text="Repeat Settings", padx=8, pady=6, font=("Segoe UI", 9))
+        repeat_frame.pack(fill=tk.X, padx=12, pady=5)
+
+        # Unlimited repeats checkbox
+        self.playback_unlimited_var = tk.BooleanVar(value=False)
+        unlimited_cb = tk.Checkbutton(
+            repeat_frame,
+            text="∞ Repeat Continuously (until stopped)",
+            variable=self.playback_unlimited_var,
+            command=self.toggle_playback_repeat,
+            font=("Segoe UI", 9),
+            fg="#e74c3c"
+        )
+        unlimited_cb.pack(anchor=tk.W, pady=3)
+
+        # Repeat count
+        count_frame = tk.Frame(repeat_frame)
+        count_frame.pack(fill=tk.X, pady=3)
+
+        tk.Label(count_frame, text="Repeat Count:", font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        
+        self.playback_repeat_var = tk.IntVar(value=1)
+        self.playback_repeat_spinbox = tk.Spinbox(
+            count_frame,
+            from_=1,
+            to=100,
+            textvariable=self.playback_repeat_var,
+            width=5,
+            font=("Segoe UI", 9)
+        )
+        self.playback_repeat_spinbox.pack(side=tk.LEFT, padx=5)
+        
+        tk.Label(count_frame, text="time(s)", font=("Segoe UI", 9)).pack(side=tk.LEFT)
+
+        # Interval between repeats
+        interval_frame = tk.Frame(repeat_frame)
+        interval_frame.pack(fill=tk.X, pady=3)
+
+        tk.Label(interval_frame, text="Interval between plays:", font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        
+        self.playback_interval_var = tk.DoubleVar(value=0)
+        interval_options = [
+            ("None", 0),
+            ("5 sec", 5),
+            ("30 sec", 30),
+            ("1 min", 60),
+            ("5 min", 300),
+            ("10 min", 600),
+            ("15 min", 900),
+            ("30 min", 1800),
+            ("1 hour", 3600)
+        ]
+        
+        self.playback_interval_combo = ttk.Combobox(
+            interval_frame,
+            values=[opt[0] for opt in interval_options],
+            state="readonly",
+            width=10,
+            font=("Segoe UI", 9)
+        )
+        self.playback_interval_combo.current(0)
+        self.playback_interval_combo.pack(side=tk.LEFT, padx=5)
+        
+        # Store interval mapping
+        self.playback_interval_map = {opt[0]: opt[1] for opt in interval_options}
+        
+        tk.Label(
+            repeat_frame,
+            text="Example: Play 5 times, with 10 min interval between each play",
+            font=("Segoe UI", 8),
+            fg="gray"
+        ).pack(anchor=tk.W, pady=3)
+
+        # Play/Stop buttons
+        btn_frame = tk.Frame(playback_frame)
+        btn_frame.pack(pady=10)
+
+        self.playback_play_btn = tk.Button(
+            btn_frame,
             text="▶ Play Recording",
             command=self.play_recording,
             bg="#27ae60",
@@ -725,7 +813,31 @@ class AutoClickerGUI:
             pady=10,
             cursor="hand2"
         )
-        play_btn.pack(pady=10)
+        self.playback_play_btn.pack(side=tk.LEFT, padx=5)
+
+        self.playback_stop_btn = tk.Button(
+            btn_frame,
+            text="⏹ Stop",
+            command=self.stop_playback,
+            bg="#e74c3c",
+            fg="white",
+            font=("Segoe UI", 10, "bold"),
+            relief=tk.FLAT,
+            padx=20,
+            pady=10,
+            cursor="hand2",
+            state=tk.DISABLED
+        )
+        self.playback_stop_btn.pack(side=tk.LEFT, padx=5)
+
+        # Status label
+        self.playback_status_label = tk.Label(
+            playback_frame,
+            text="",
+            font=("Segoe UI", 9),
+            fg="gray"
+        )
+        self.playback_status_label.pack()
 
         # Warning
         warning_label = tk.Label(
@@ -735,6 +847,9 @@ class AutoClickerGUI:
             fg="#e74c3c"
         )
         warning_label.pack()
+
+        # State variable for stopping
+        self.playback_running = False
 
     def create_image_click_tab(self):
         """Create the image template matching tab"""
@@ -1225,24 +1340,95 @@ class AutoClickerGUI:
             self.log(f"Error loading recording: {e}")
             messagebox.showerror("Error", f"Failed to load recording: {e}")
 
+    def toggle_playback_repeat(self):
+        """Enable/disable repeat count spinbox based on unlimited checkbox"""
+        if self.playback_unlimited_var.get():
+            self.playback_repeat_spinbox.config(state=tk.DISABLED)
+        else:
+            self.playback_repeat_spinbox.config(state=tk.NORMAL)
+
+    def stop_playback(self):
+        """Stop the repeating playback"""
+        self.playback_running = False
+        self.log("Stopping playback...")
+        self.playback_status_label.config(text="Stopping...", fg="orange")
+
     def play_recording(self):
-        """Play back the loaded recording"""
+        """Play back the loaded recording with repeat options"""
         if not self.loaded_events:
             messagebox.showwarning("No Recording", "Please load a recording first")
             return
 
         speed = self.speed_var.get()
+        unlimited = self.playback_unlimited_var.get()
+        repeat_count = self.playback_repeat_var.get() if not unlimited else -1
+        
+        # Get interval from combo selection
+        interval_text = self.playback_interval_combo.get()
+        interval = self.playback_interval_map.get(interval_text, 0)
 
+        # Update UI
+        self.playback_running = True
+        self.playback_play_btn.config(state=tk.DISABLED)
+        self.playback_stop_btn.config(state=tk.NORMAL)
+        
         def playback_thread():
             try:
-                self.log(f"Starting playback at {speed}x speed...")
-                self.update_status(f"Playing back recording at {speed}x speed...")
-                self.clicker.play_recording(self.loaded_events, speed=speed)
-                self.log("Playback completed")
-                self.update_status("Playback completed")
+                play_count = 0
+                
+                while self.playback_running:
+                    play_count += 1
+                    
+                    # Update status
+                    if unlimited:
+                        status = f"Playing... (repeat #{play_count}, ∞ mode)"
+                    else:
+                        status = f"Playing... ({play_count}/{repeat_count})"
+                    
+                    self.root.after(0, lambda s=status: self.playback_status_label.config(text=s, fg="blue"))
+                    self.root.after(0, lambda: self.log(f"Playback #{play_count} at {speed}x speed..."))
+                    self.root.after(0, lambda: self.update_status(f"Playing back recording..."))
+                    
+                    # Play the recording
+                    self.clicker.play_recording(self.loaded_events, speed=speed)
+                    
+                    # Check if we should stop
+                    if not self.playback_running:
+                        break
+                    
+                    # Check if we've done enough repeats
+                    if not unlimited and play_count >= repeat_count:
+                        break
+                    
+                    # Wait for interval if there's another repeat coming
+                    if self.playback_running and (unlimited or play_count < repeat_count):
+                        if interval > 0:
+                            self.root.after(0, lambda: self.playback_status_label.config(
+                                text=f"Waiting {interval}s before next play...", fg="gray"))
+                            self.root.after(0, lambda i=interval: self.log(f"Waiting {i} seconds..."))
+                            
+                            # Wait in small increments so we can stop
+                            for _ in range(int(interval)):
+                                if not self.playback_running:
+                                    break
+                                time.sleep(1)
+                            
+                            if not self.playback_running:
+                                break
+                
+                # Done
+                self.root.after(0, lambda: self.log(f"Playback completed! Total plays: {play_count}"))
+                self.root.after(0, lambda: self.playback_status_label.config(
+                    text=f"Completed {play_count} play(s)", fg="green"))
+                self.root.after(0, lambda: self.update_status("Playback completed"))
+                
             except Exception as e:
-                self.log(f"Error during playback: {e}")
-                messagebox.showerror("Error", f"Playback failed: {e}")
+                self.root.after(0, lambda: self.log(f"Error during playback: {e}"))
+                self.root.after(0, lambda: self.playback_status_label.config(text="Error!", fg="red"))
+            finally:
+                self.playback_running = False
+                self.root.after(0, lambda: self.playback_play_btn.config(state=tk.NORMAL))
+                self.root.after(0, lambda: self.playback_stop_btn.config(state=tk.DISABLED))
 
         threading.Thread(target=playback_thread, daemon=True).start()
 
@@ -2481,6 +2667,8 @@ class AutoClickerGUI:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to create monitor preview: {e}")
             self.log(f"Error creating monitor preview: {e}")
+
+
 
     def log(self, message):
         """Add message to log and write to file"""

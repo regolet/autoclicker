@@ -150,6 +150,8 @@ def repeat_click_mode(args):
     clicker.repeat_clicks(args.x, args.y, args.count, interval, button)
 
 
+
+
 def main():
     """Main entry point"""
     print_banner()
@@ -213,6 +215,7 @@ Examples:
     repeat_parser.add_argument('--interval', type=float, help='Interval between clicks (default: 1.0)')
     repeat_parser.add_argument('--button', choices=['left', 'right'], help='Mouse button (default: left)')
 
+
     args = parser.parse_args()
 
     if not args.mode:
@@ -227,6 +230,7 @@ Examples:
         'image-click': image_click_mode,
         'screenshot': screenshot_mode,
         'repeat': repeat_click_mode
+
     }
 
     if args.mode in modes:
